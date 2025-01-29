@@ -44,9 +44,10 @@ class TrackingNode(LifecycleNode):
     def __init__(self) -> None:
         super().__init__("tracking_node")
 
-        # params
+        # declare params
         self.declare_parameter("tracker", "bytetrack.yaml")
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
+        self.declare_parameter("image_input_topic", "/perception/camera_front_center/image")
 
         self.cv_bridge = CvBridge()
 
@@ -55,9 +56,11 @@ class TrackingNode(LifecycleNode):
 
         tracker_name = self.get_parameter("tracker").get_parameter_value().string_value
 
+        #get params
         self.image_reliability = (
             self.get_parameter("image_reliability").get_parameter_value().integer_value
         )
+        self.input_image_topic = self.get_parameter("input_image_topic").value
 
         self.tracker = self.create_tracker(tracker_name)
         self._pub = self.create_publisher(DetectionArray, "tracking", 10)
@@ -79,10 +82,10 @@ class TrackingNode(LifecycleNode):
 
         # subs
         image_sub = message_filters.Subscriber(
-            self, Image, "image_raw", qos_profile=image_qos_profile
+            self, Image, self.input_image_topic, qos_profile=image_qos_profile
         )
         detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "detections", qos_profile=10
+            self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
         )
 
         self._synchronizer = message_filters.ApproximateTimeSynchronizer(

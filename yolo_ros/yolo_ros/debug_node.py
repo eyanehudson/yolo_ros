@@ -18,6 +18,7 @@ import cv2
 import random
 import numpy as np
 from typing import Tuple
+import numpy as np
 
 import rclpy
 from rclpy.duration import Duration
@@ -51,8 +52,10 @@ class DebugNode(LifecycleNode):
         self._class_to_color = {}
         self.cv_bridge = CvBridge()
 
-        # params
-        self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
+        # declare params
+        self.declare_parameter("image_reliability", QoSReliabilityPolicy.RELIABLE)
+        self.declare_parameter("image_input_topic", "/perception/camera_front_center/image")
+        self.declare_parameter("detection_topic", "/perception/post/camera_front_center/detections")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
@@ -63,13 +66,17 @@ class DebugNode(LifecycleNode):
             .integer_value,
             history=QoSHistoryPolicy.KEEP_LAST,
             durability=QoSDurabilityPolicy.VOLATILE,
-            depth=1,
+            depth=10,
         )
 
+        # get parameters
+        self.image_input_topic = self.get_parameter("image_input_topic").value
+        self.detection_topic = self.get_parameter("detection_topic").value
+
         # pubs
-        self._dbg_pub = self.create_publisher(Image, "dbg_image", 10)
-        self._bb_markers_pub = self.create_publisher(MarkerArray, "dgb_bb_markers", 10)
-        self._kp_markers_pub = self.create_publisher(MarkerArray, "dgb_kp_markers", 10)
+        self._dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_center/dbg_image", 10)
+        self._bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_bb_markers", 10)
+        self._kp_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_kp_markers", 10)
 
         super().on_configure(state)
         self.get_logger().info(f"[{self.get_name()}] Configured")
@@ -81,10 +88,10 @@ class DebugNode(LifecycleNode):
 
         # subs
         self.image_sub = message_filters.Subscriber(
-            self, Image, "image_raw", qos_profile=self.image_qos_profile
+            self, Image, self.image_input_topic, qos_profile=self.image_qos_profile
         )
         self.detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "detections", qos_profile=10
+            self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
         )
 
         self._synchronizer = message_filters.ApproximateTimeSynchronizer(
@@ -326,7 +333,40 @@ class DebugNode(LifecycleNode):
 
     def detections_cb(self, img_msg: Image, detection_msg: DetectionArray) -> None:
 
-        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg)
+        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, "bgr8")
+
+        # get camera info
+        # cam_info = cam_info_ # TODO: based on the way the cam_info is published, re-write this 
+        # Camera intrinsic parameters
+        fx = 1007.495139
+        fy = 1010.049539
+        cx = 1067.657077
+        cy = 746.317718
+        mtx = np.array([[fx, 0, cx],
+                        [0, fy, cy],
+                        [0, 0, 1]])
+
+        # Distortion coefficients
+        k1 = -0.167576
+        k2 = 0.047559
+        p1 = -0.000515
+        p2 = 0.003160
+        k3 = 0.0
+        dist = np.array([k1, k2, p1, p2, k3])
+
+        # Get image size
+        h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
+
+        # Get the optimal new camera matrix
+        new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 0, (w, h))
+        # undistort the image before running YOLO
+        # undistort
+        dst = cv2.undistort(cv_image, mtx, dist, None, new_camera_mtx)
+
+        # crop the image
+        x, y, w, h = roi 
+        dst = dst[y:y+h,x:x+w]
+
         bb_marker_array = MarkerArray()
         kp_marker_array = MarkerArray()
 
@@ -364,7 +404,7 @@ class DebugNode(LifecycleNode):
 
         # publish dbg image
         self._dbg_pub.publish(
-            self.cv_bridge.cv2_to_imgmsg(cv_image, encoding=img_msg.encoding)
+            self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
         )
         self._bb_markers_pub.publish(bb_marker_array)
         self._kp_markers_pub.publish(kp_marker_array)

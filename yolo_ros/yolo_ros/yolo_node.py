@@ -15,8 +15,14 @@
 
 
 import cv2
+import os
+import sys
+
+
 from typing import List, Dict
 from cv_bridge import CvBridge
+
+import numpy as np
 
 import rclpy
 from rclpy.qos import QoSProfile
@@ -33,9 +39,11 @@ from ultralytics.engine.results import Results
 from ultralytics.engine.results import Boxes
 from ultralytics.engine.results import Masks
 from ultralytics.engine.results import Keypoints
+import message_filters
+
 
 from std_srvs.srv import SetBool
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from yolo_msgs.msg import Point2D
 from yolo_msgs.msg import BoundingBox2D
 from yolo_msgs.msg import Mask
@@ -45,82 +53,81 @@ from yolo_msgs.msg import Detection
 from yolo_msgs.msg import DetectionArray
 from yolo_msgs.srv import SetClasses
 
+# import custom msg type
+from blackandgold_msgs.msg import CameraBoundingBoxes, CameraBox
+
+
+from ament_index_python.packages import get_package_share_directory
+file_location = get_package_share_directory('yolo_ros')
+sys.path.insert(0, os.path.join(file_location))
 
 class YoloNode(LifecycleNode):
 
     def __init__(self) -> None:
         super().__init__("yolo_node")
 
-        # params
+        # declare all params 
         self.declare_parameter("model_type", "YOLO")
-        self.declare_parameter("model", "yolov8m.pt")
+        self.declare_parameter("model", "yolo_v11s.pt")
         self.declare_parameter("device", "cuda:0")
 
-        self.declare_parameter("threshold", 0.5)
+        self.declare_parameter("threshold", 0.75)
         self.declare_parameter("iou", 0.5)
         self.declare_parameter("imgsz_height", 640)
         self.declare_parameter("imgsz_width", 640)
         self.declare_parameter("half", False)
-        self.declare_parameter("max_det", 300)
+        self.declare_parameter("max_det", 3)
         self.declare_parameter("augment", False)
         self.declare_parameter("agnostic_nms", False)
         self.declare_parameter("retina_masks", False)
 
         self.declare_parameter("enable", True)
-        self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
+        self.declare_parameter("image_reliability", QoSReliabilityPolicy.RELIABLE)
+        self.declare_parameter("image_input_topic", "/perception/camera_front_center/image")
+        self.declare_parameter("detection_topic", "/perception/post/camera_front_center/detections")
 
         self.type_to_model = {"YOLO": YOLO, "NAS": NAS, "World": YOLOWorld}
+
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
 
-        # model params
-        self.model_type = (
-            self.get_parameter("model_type").get_parameter_value().string_value
-        )
-        self.model = self.get_parameter("model").get_parameter_value().string_value
-        self.device = self.get_parameter("device").get_parameter_value().string_value
+        # get all params from params.yaml file
+        self.model_type = self.get_parameter("model_type").value
+        self.model_ = self.get_parameter("model").value # this is the name of the .pt model
+        self.model = os.path.join(file_location, 'config', self.model_) # this is the full path of the .pt model
+        
+        self.device = self.get_parameter("device").value
+        self.threshold = self.get_parameter("threshold").value
+        self.iou = self.get_parameter("iou").value
+        self.imgsz_height = self.get_parameter("imgsz_height").value
+        self.imgsz_width = self.get_parameter("imgsz_width").value
+        self.half = self.get_parameter("half").value
+        self.max_det = self.get_parameter("max_det").value
+        self.augment = self.get_parameter("augment").value
+        self.agnostic_nms = self.get_parameter("agnostic_nms").value
+        self.retina_masks = self.get_parameter("retina_masks").value
+        self.enable = self.get_parameter("enable").value
+        self.reliability = self.get_parameter("image_reliability").value
+        self.image_input_topic = self.get_parameter("image_input_topic").value
+        self.detection_topic = self.get_parameter("detection_topic").value
 
-        # inference params
-        self.threshold = (
-            self.get_parameter("threshold").get_parameter_value().double_value
-        )
-        self.iou = self.get_parameter("iou").get_parameter_value().double_value
-        self.imgsz_height = (
-            self.get_parameter("imgsz_height").get_parameter_value().integer_value
-        )
-        self.imgsz_width = (
-            self.get_parameter("imgsz_width").get_parameter_value().integer_value
-        )
-        self.half = self.get_parameter("half").get_parameter_value().bool_value
-        self.max_det = self.get_parameter("max_det").get_parameter_value().integer_value
-        self.augment = self.get_parameter("augment").get_parameter_value().bool_value
-        self.agnostic_nms = (
-            self.get_parameter("agnostic_nms").get_parameter_value().bool_value
-        )
-        self.retina_masks = (
-            self.get_parameter("retina_masks").get_parameter_value().bool_value
-        )
-
-        # ros params
-        self.enable = self.get_parameter("enable").get_parameter_value().bool_value
-        self.reliability = (
-            self.get_parameter("image_reliability").get_parameter_value().integer_value
-        )
-
-        # detection pub
+        # set image qos
         self.image_qos_profile = QoSProfile(
             reliability=self.reliability,
             history=QoSHistoryPolicy.KEEP_LAST,
             durability=QoSDurabilityPolicy.VOLATILE,
-            depth=1,
+            depth=10,
         )
 
-        self._pub = self.create_lifecycle_publisher(DetectionArray, "detections", 10)
+        # detection publisher
+        self._pub = self.create_lifecycle_publisher(DetectionArray, self.detection_topic, 10)
+        
         self.cv_bridge = CvBridge()
 
         super().on_configure(state)
         self.get_logger().info(f"[{self.get_name()}] Configured")
+        
 
         return TransitionCallbackReturn.SUCCESS
 
@@ -129,6 +136,7 @@ class YoloNode(LifecycleNode):
 
         try:
             self.yolo = self.type_to_model[self.model_type](self.model)
+            self.get_logger().info(f"Using [{self.model_}]")
         except FileNotFoundError:
             self.get_logger().error(f"Model file '{self.model}' does not exists")
             return TransitionCallbackReturn.ERROR
@@ -147,8 +155,12 @@ class YoloNode(LifecycleNode):
             )
 
         self._sub = self.create_subscription(
-            Image, "image_raw", self.image_cb, self.image_qos_profile
+            Image, self.image_input_topic, self.image_cb, self.image_qos_profile
         )
+
+        # self.cam_info_sub = message_filters.Subscriber(
+        #     self, CameraInfo, "/perception/camera_front_center/camera_info", 10
+        # )
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
@@ -322,10 +334,44 @@ class YoloNode(LifecycleNode):
     def image_cb(self, msg: Image) -> None:
 
         if self.enable:
-
-            # convert image + predict
+            
+            # convert image
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+
+            # get camera info
+            # cam_info = cam_info_ # TODO: based on the way the cam_info is published, re-write this 
+            # Camera intrinsic parameters
+            fx = 1007.495139
+            fy = 1010.049539
+            cx = 1067.657077
+            cy = 746.317718
+            mtx = np.array([[fx, 0, cx],
+                            [0, fy, cy],
+                            [0, 0, 1]])
+
+            # Distortion coefficients
+            k1 = -0.167576
+            k2 = 0.047559
+            p1 = -0.000515
+            p2 = 0.003160
+            k3 = 0.0
+            dist = np.array([k1, k2, p1, p2, k3])
+
+            # Get image size
+            h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
+
+            # Get the optimal new camera matrix
+            new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 0, (w, h))
+            # undistort the image before running YOLO
+            # undistort
+            dst = cv2.undistort(cv_image, mtx, dist, None, new_camera_mtx)
+
+            # crop the image
+            x, y, w, h = roi 
+            dst = dst[y:y+h,x:x+w]
+
+            # predict
             results = self.yolo.predict(
                 source=cv_image,
                 verbose=False,
@@ -340,7 +386,7 @@ class YoloNode(LifecycleNode):
                 retina_masks=self.retina_masks,
                 device=self.device,
             )
-            results: Results = results[0].cpu()
+            results: Results = results[0].cuda()
 
             if results.boxes or results.obb:
                 hypothesis = self.parse_hypothesis(results)

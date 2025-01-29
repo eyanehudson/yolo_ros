@@ -48,13 +48,13 @@ class Detect3DNode(LifecycleNode):
         super().__init__("bbox3d_node")
 
         # parameters
-        self.declare_parameter("target_frame", "base_link")
+        self.declare_parameter("target_frame", "center_of_gravity")
         self.declare_parameter("maximum_detection_threshold", 0.3)
         self.declare_parameter("depth_image_units_divisor", 1000)
         self.declare_parameter(
-            "depth_image_reliability", QoSReliabilityPolicy.BEST_EFFORT
+            "depth_image_reliability", QoSReliabilityPolicy.RELIABLE
         )
-        self.declare_parameter("depth_info_reliability", QoSReliabilityPolicy.BEST_EFFORT)
+        self.declare_parameter("depth_info_reliability", QoSReliabilityPolicy.RELIABLE)
 
         # aux
         self.tf_buffer = Buffer()

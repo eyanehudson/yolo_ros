@@ -1,4 +1,6 @@
 from setuptools import setup
+import os
+from glob import glob
 
 package_name = "yolo_ros"
 
@@ -9,6 +11,11 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        (os.path.join('share', package_name, 'config'), glob('yolo_ros/config/*.pt')),
+        (os.path.join('share', package_name, 'launch'), glob('./launch/*.launch.py')),        
+        (os.path.join('share', package_name, 'params'), glob('yolo_ros/params/*.yaml')),        
+
+
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -23,6 +30,7 @@ setup(
             "debug_node = yolo_ros.debug_node:main",
             "tracking_node = yolo_ros.tracking_node:main",
             "detect_3d_node = yolo_ros.detect_3d_node:main",
+            "calc_bbox_node = yolo_ros.calc_bbox_node:main"
         ],
     },
 )
