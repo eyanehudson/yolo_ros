@@ -34,7 +34,7 @@ import message_filters
 from cv_bridge import CvBridge
 from ultralytics.utils.plotting import Annotator, colors
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from yolo_msgs.msg import BoundingBox2D
@@ -54,8 +54,21 @@ class DebugNode(LifecycleNode):
 
         # declare params
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.RELIABLE)
-        self.declare_parameter("image_input_topic", "/perception/camera_front_center/image")
-        self.declare_parameter("detection_topic", "/perception/post/camera_front_center/detections")
+        self.declare_parameter("undistort", True)
+
+        self.declare_parameter("fc_input_topic", "/perception/camera_front_center/image")
+        self.declare_parameter("rc_input_topic", "/perception/camera_rear_center/image")
+        self.declare_parameter("rs_input_topic", "/perception/camera_right_side/image")
+        self.declare_parameter("ls_input_topic", "/perception/camera_left_side/image")
+        self.declare_parameter("fr_input_topic", "/perception/camera_front_right/image")
+        self.declare_parameter("fl_input_topic", "/perception/camera_front_left/image")
+
+        self.declare_parameter("fc_detection_topic", "/perception/post/camera_front_center/detections")
+        self.declare_parameter("rc_detection_topic", "/perception/post/camera_rear_center/detections")
+        self.declare_parameter("rs_detection_topic", "/perception/post/camera_right_side/detections")
+        self.declare_parameter("ls_detection_topic", "/perception/post/camera_left_side/detections")
+        self.declare_parameter("fr_detection_topic", "/perception/post/camera_front_right/detections")
+        self.declare_parameter("fl_detection_topic", "/perception/post/camera_front_left/detections")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
@@ -70,13 +83,45 @@ class DebugNode(LifecycleNode):
         )
 
         # get parameters
-        self.image_input_topic = self.get_parameter("image_input_topic").value
-        self.detection_topic = self.get_parameter("detection_topic").value
+        self.fc_input_topic = self.get_parameter("fc_input_topic").value
+        self.rc_input_topic = self.get_parameter("rc_input_topic").value
+        self.rs_input_topic = self.get_parameter("rs_input_topic").value
+        self.ls_input_topic = self.get_parameter("ls_input_topic").value
+        self.fr_input_topic = self.get_parameter("fr_input_topic").value
+        self.fl_input_topic = self.get_parameter("fl_input_topic").value
+
+        self.fc_detection_topic = self.get_parameter("fc_detection_topic").value
+        self.rc_detection_topic = self.get_parameter("rc_detection_topic").value
+        self.rs_detection_topic = self.get_parameter("rs_detection_topic").value
+        self.ls_detection_topic = self.get_parameter("ls_detection_topic").value
+        self.fr_detection_topic = self.get_parameter("fr_detection_topic").value
+        self.fl_detection_topic = self.get_parameter("fl_detection_topic").value
+
+        self.undistort = self.get_parameter("undistort").value
 
         # pubs
-        self._dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_center/dbg_image", 10)
-        self._bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_bb_markers", 10)
-        self._kp_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_kp_markers", 10)
+        self.fc_dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_center/dbg_image", 10)
+        self.fc_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_bb_markers", 10)
+
+        self.rc_dbg_pub = self.create_publisher(Image, "/perception/post/camera_rear_center/dbg_image", 10)
+        self.rc_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_rear_center/dgb_bb_markers", 10)
+
+        self.rs_dbg_pub = self.create_publisher(Image, "/perception/post/camera_right_side/dbg_image", 10)
+        self.rs_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_right_side/dgb_bb_markers", 10)
+
+        self.ls_dbg_pub = self.create_publisher(Image, "/perception/post/camera_left_side/dbg_image", 10)
+        self.ls_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_left_side/dgb_bb_markers", 10)
+
+        self.fr_dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_right/dbg_image", 10)
+        self.fr_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_right/dgb_bb_markers", 10)
+
+        self.fl_dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_left/dbg_image", 10)
+        self.fl_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_left/dgb_bb_markers", 10)
+        
+        # self._kp_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_kp_markers", 10)
+
+        # get boolean flags
+        self.cam_info_done = 0
 
         super().on_configure(state)
         self.get_logger().info(f"[{self.get_name()}] Configured")
@@ -85,19 +130,98 @@ class DebugNode(LifecycleNode):
 
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Activating...")
-
-        # subs
-        self.image_sub = message_filters.Subscriber(
-            self, Image, self.image_input_topic, qos_profile=self.image_qos_profile
+       
+        # Camera info topic subscribers 
+        self.fc_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
         )
-        self.detections_sub = message_filters.Subscriber(
+        self.rc_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_rear_center/camera_info", self.get_camera_info, 10
+        )
+        self.rs_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_right_side/camera_info", self.get_camera_info, 10
+        )
+        self.ls_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_left_side/camera_info", self.get_camera_info, 10
+        )
+        self.fr_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_front_right/camera_info", self.get_camera_info, 10
+        )
+        self.fl_cam_info_sub = self.create_subscription(
+            CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
+        )
+
+        # camera subs
+        self.fc_image_sub = message_filters.Subscriber(
+            self, Image, self.fc_input_topic, qos_profile=self.image_qos_profile
+        )
+        self.rc_image_sub = message_filters.Subscriber(
+            self, Image, self.rc_input_topic, qos_profile=self.image_qos_profile
+        )
+        self.rs_image_sub = message_filters.Subscriber(
+            self, Image, self.rs_input_topic, qos_profile=self.image_qos_profile
+        )
+        self.ls_image_sub = message_filters.Subscriber(
+            self, Image, self.ls_input_topic, qos_profile=self.image_qos_profile
+        )
+        self.fr_image_sub = message_filters.Subscriber(
+            self, Image, self.fr_input_topic, qos_profile=self.image_qos_profile
+        )
+        self.fl_image_sub = message_filters.Subscriber(
+            self, Image, self.fl_input_topic, qos_profile=self.image_qos_profile
+        )
+
+        # detection subs 
+        self.fc_detections_sub = message_filters.Subscriber(
             self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
         )
+        self.rc_detections_sub = message_filters.Subscriber(
+            self, DetectionArray, "/perception/post/camera_rear_center/detections", qos_profile=10
+        )
+        self.rs_detections_sub = message_filters.Subscriber(
+            self, DetectionArray, "/perception/post/camera_right_side/detections", qos_profile=10
+        )
+        self.ls_detections_sub = message_filters.Subscriber(
+            self, DetectionArray, "/perception/post/camera_left_side/detections", qos_profile=10
+        )
+        self.fr_detections_sub = message_filters.Subscriber(
+            self, DetectionArray, "/perception/post/camera_front_right/detections", qos_profile=10
+        )
+        self.fl_detections_sub = message_filters.Subscriber(
+            self, DetectionArray, "/perception/post/camera_front_left/detections", qos_profile=10
+        )
 
+        
         self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.image_sub, self.detections_sub), 10, 0.5
+            (self.fc_image_sub, self.fc_detections_sub), 10, 0.5
         )
         self._synchronizer.registerCallback(self.detections_cb)
+
+        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+            (self.rc_image_sub, self.rc_detections_sub), 10, 0.5
+        )
+        self._synchronizer.registerCallback(self.detections_cb)
+        
+        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+            (self.rs_image_sub, self.rs_detections_sub), 10, 0.5
+        )
+        self._synchronizer.registerCallback(self.detections_cb)
+
+        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+            (self.ls_image_sub, self.ls_detections_sub), 10, 0.5
+        )
+        self._synchronizer.registerCallback(self.detections_cb)
+
+        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+            (self.fr_image_sub, self.fr_detections_sub), 10, 0.5
+        )
+        self._synchronizer.registerCallback(self.detections_cb)
+
+        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+            (self.fl_image_sub, self.fl_detections_sub), 10, 0.5
+        )
+        self._synchronizer.registerCallback(self.detections_cb)
+
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
@@ -107,8 +231,47 @@ class DebugNode(LifecycleNode):
     def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Deactivating...")
 
-        self.destroy_subscription(self.image_sub.sub)
-        self.destroy_subscription(self.detections_sub.sub)
+        # destroy cam subs 
+        self.destroy_subscription(self.fc_image_sub)
+        self.fc_image_sub = None
+        self.destroy_subscription(self.rc_image_sub)
+        self.rc_image_sub = None
+        self.destroy_subscription(self.rs_image_sub)
+        self.rs_image_sub = None
+        self.destroy_subscription(self.ls_image_sub)
+        self.ls_image_sub = None
+        self.destroy_subscription(self.fr_image_sub)
+        self.fr_image_sub = None
+        self.destroy_subscription(self.fl_image_sub)
+        self.fl_image_sub = None
+
+        # destroy detection subs
+        self.destroy_subscription(self.fc_detections_sub)
+        self.fc_detections_sub = None
+        self.destroy_subscription(self.rc_detections_sub)
+        self.rc_detections_sub = None
+        self.destroy_subscription(self.rs_detections_sub)
+        self.rs_detections_sub = None
+        self.destroy_subscription(self.ls_detections_sub)
+        self.ls_detections_sub = None
+        self.destroy_subscription(self.fr_detections_sub)
+        self.fr_detections_sub = None
+        self.destroy_subscription(self.fl_detections_sub)
+        self.fl_detections_sub = None
+
+        # destroy cam info subs
+        self.destroy_subscription(self.fc_cam_info_sub)
+        self.fc_cam_info_sub = None
+        self.destroy_subscription(self.rc_cam_info_sub)
+        self.rc_cam_info_sub = None
+        self.destroy_subscription(self.rs_cam_info_sub)
+        self.rs_cam_info_sub = None
+        self.destroy_subscription(self.ls_cam_info_sub)
+        self.ls_cam_info_sub = None
+        self.destroy_subscription(self.fr_cam_info_sub)
+        self.fr_cam_info_sub = None
+        self.destroy_subscription(self.fl_cam_info_sub)
+        self.fl_cam_info_sub = None
 
         del self._synchronizer
 
@@ -120,9 +283,21 @@ class DebugNode(LifecycleNode):
     def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Cleaning up...")
 
-        self.destroy_publisher(self._dbg_pub)
-        self.destroy_publisher(self._bb_markers_pub)
-        self.destroy_publisher(self._kp_markers_pub)
+        self.destroy_publisher(self.fc_dbg_pub)
+        self.destroy_publisher(self.rc_dbg_pub)
+        self.destroy_publisher(self.rs_dbg_pub)
+        self.destroy_publisher(self.ls_dbg_pub)
+        self.destroy_publisher(self.fr_dbg_pub)
+        self.destroy_publisher(self.fl_dbg_pub)
+
+        self.destroy_publisher(self.fc_bb_markers_pub)
+        self.destroy_publisher(self.rc_bb_markers_pub)
+        self.destroy_publisher(self.rs_bb_markers_pub)
+        self.destroy_publisher(self.ls_bb_markers_pub)
+        self.destroy_publisher(self.fr_bb_markers_pub)
+        self.destroy_publisher(self.fl_bb_markers_pub)
+        
+        # self.destroy_publisher(self._kp_markers_pub)
 
         super().on_cleanup(state)
         self.get_logger().info(f"[{self.get_name()}] Cleaned up")
@@ -215,6 +390,7 @@ class DebugNode(LifecycleNode):
 
         keypoints_msg = detection.keypoints
 
+        cv_image = np.ascontiguousarray(cv_image)  # Fix non-contiguous memory
         ann = Annotator(cv_image)
 
         kp: KeyPoint2D
@@ -331,41 +507,96 @@ class DebugNode(LifecycleNode):
 
         return marker
 
+    def get_camera_info(self, cam_info: CameraInfo):
+    
+        # decide which camera you need the cam_info for
+        self.get_logger().info(f"[{self.get_name()}] getting {cam_info.header.frame_id} camera info")
+        self.get_logger().info(f"[{self.get_name()}] cam info is at {self.cam_info_done+1}")
+
+        # kill the subscriber
+        if cam_info.header.frame_id == "camera_front_center" and self.fc_cam_info_sub:  # front center camera
+            self.fc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.fc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.fc_cam_info_sub)
+            self.fc_cam_info_sub = None
+            self.cam_info_done += 1
+
+        elif cam_info.header.frame_id == "camera_rear_center" and self.rc_cam_info_sub: # rear center camera
+            self.rc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.rc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.rc_cam_info_sub)
+            self.rc_cam_info_sub = None
+            self.cam_info_done += 1
+
+        elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
+            self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.rs_cam_info_sub)
+            self.rs_cam_info_sub = None
+            self.cam_info_done += 1
+
+        elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
+            self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.ls_cam_info_sub)
+            self.ls_cam_info_sub = None
+            self.cam_info_done += 1
+            
+        elif cam_info.header.frame_id == "camera_front_right" and self.fr_cam_info_sub: # front right camera
+            self.fr_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.fr_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.fr_cam_info_sub)
+            self.fr_cam_info_sub = None
+            self.cam_info_done += 1
+
+        elif cam_info.header.frame_id == "camera_front_left" and self.fl_cam_info_sub: # front left camera
+            self.fl_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
+            self.fl_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
+            self.destroy_subscription(self.fl_cam_info_sub)
+            self.fl_cam_info_sub = None
+            self.cam_info_done += 1
+
+
     def detections_cb(self, img_msg: Image, detection_msg: DetectionArray) -> None:
 
         cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, "bgr8")
 
-        # get camera info
-        # cam_info = cam_info_ # TODO: based on the way the cam_info is published, re-write this 
-        # Camera intrinsic parameters
-        fx = 1007.495139
-        fy = 1010.049539
-        cx = 1067.657077
-        cy = 746.317718
-        mtx = np.array([[fx, 0, cx],
-                        [0, fy, cy],
-                        [0, 0, 1]])
+        # if unndistort is enabled and cam info is stored, then undistort the image
+        if self.undistort and self.cam_info_done == 6:
 
-        # Distortion coefficients
-        k1 = -0.167576
-        k2 = 0.047559
-        p1 = -0.000515
-        p2 = 0.003160
-        k3 = 0.0
-        dist = np.array([k1, k2, p1, p2, k3])
+            # get camera info
+            if img_msg.header.frame_id == "camera_front_center": 
+                k_mtx = self.fc_k_mtx
+                d_mtx = self.fc_d_mtx
+            if img_msg.header.frame_id == "camera_rear_center": 
+                k_mtx = self.rc_k_mtx
+                d_mtx = self.rc_d_mtx
+            if img_msg.header.frame_id == "camera_right_side": 
+                k_mtx = self.rs_k_mtx
+                d_mtx = self.rs_d_mtx
+            if img_msg.header.frame_id == "camera_left_side": 
+                k_mtx = self.ls_k_mtx
+                d_mtx = self.ls_d_mtx
+            if img_msg.header.frame_id == "camera_front_right": 
+                k_mtx = self.fr_k_mtx
+                d_mtx = self.fr_d_mtx
+            if img_msg.header.frame_id == "camera_front_left": 
+                k_mtx = self.fl_k_mtx
+                d_mtx = self.fl_d_mtx
 
-        # Get image size
-        h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
+            # Get image size
+            h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
 
-        # Get the optimal new camera matrix
-        new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 0, (w, h))
-        # undistort the image before running YOLO
-        # undistort
-        dst = cv2.undistort(cv_image, mtx, dist, None, new_camera_mtx)
+            # Get the optimal new camera matrix
+            new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(k_mtx, d_mtx, (w, h), 0, (w, h))
 
-        # crop the image
-        x, y, w, h = roi 
-        dst = dst[y:y+h,x:x+w]
+            # undistort the image before running YOLO
+            dst = cv2.undistort(cv_image, k_mtx, d_mtx, None, new_camera_mtx)
+
+            # crop the image
+            x, y, w, h = roi 
+            cv_image = dst[y:y+h,x:x+w]
+
 
         bb_marker_array = MarkerArray()
         kp_marker_array = MarkerArray()
@@ -401,13 +632,44 @@ class DebugNode(LifecycleNode):
                     marker.header.stamp = img_msg.header.stamp
                     marker.id = len(kp_marker_array.markers)
                     kp_marker_array.markers.append(marker)
-
+        
         # publish dbg image
-        self._dbg_pub.publish(
-            self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
-        )
-        self._bb_markers_pub.publish(bb_marker_array)
-        self._kp_markers_pub.publish(kp_marker_array)
+        if img_msg.header.frame_id == "camera_front_center":
+            self.fc_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.fc_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
+        elif img_msg.header.frame_id == "camera_rear_center":
+            self.rc_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.rc_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
+        elif img_msg.header.frame_id == "camera_right_side":
+            self.rs_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.rs_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
+        elif img_msg.header.frame_id == "camera_left_side":
+            self.ls_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.ls_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
+        elif img_msg.header.frame_id == "camera_front_right":
+            self.fr_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.fr_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
+        elif img_msg.header.frame_id == "camera_front_left":
+            self.fl_dbg_pub.publish(
+                self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            )
+            self.fl_bb_markers_pub.publish(bb_marker_array)
+            # self._kp_markers_pub.publish(kp_marker_array)
 
 
 def main():

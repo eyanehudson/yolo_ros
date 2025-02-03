@@ -6,6 +6,7 @@
     tracker: "bytetrack.yaml"                                         # tracker file (default: bytetrack.yaml)
     device: "cuda:0"                                                  # GPU/CUDA (default: cuda:0)
     enable:  True                                                     # whether to start YOLO enabled (default: True)
+    undistort: True # whether to undistort the image or not (default: true)
     threshold: 0.7                                                    # detection threshold (default: 0.5)
     iou: 0.7                                                          # intersection Over Union (IoU) threshold for Non-Maximum Suppression (NMS) (default: 0.7)
     imgsz_height: 640                                                 # image height for inference (default: 480)
@@ -15,8 +16,26 @@
     augment: False                                                    # whether to enable test-time augmentation (TTA) for predictions improving detection robustness at the cost of speed (default: False)
     agnostic_nms: False                                               # whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes (default: False)
     retina_masks: False                                               # whether to use high-resolution segmentation masks if available in the model, enhancing mask quality for segmentation (default: False)
-    input_image_topic: "/perception/camera_front_center/image"        # camera topic of RGB images (default: /camera/rgb/image_raw)
-    detection_topic: "/perception/post/camera_front_center/detections" # topic for the detections 
+    
+
+
+    # Camera image topics
+    fc_image_topic: "/perception/camera_front_center/image"        # camera topic of RGB images (default: /camera/rgb/image_raw)
+    rc_image_topic: "/perception/camera_rear_center/image"
+    rs_image_topic: "/perception/camera_right_side/image"
+    ls_image_topic: "/perception/camera_left_side/image"
+    fr_image_topic: "/perception/camera_front_right/image"
+    fl_image_topic: "/perception/camera_front_left/image"
+    
+    # Detection topics
+    fc_detection_topic: "/perception/post/camera_front_center/detections" # topic for the detections 
+    rc_detection_topic: "/perception/post/camera_rear_center/detections"  
+    rs_detection_topic: "/perception/post/camera_right_side/detections"  
+    ls_detection_topic: "/perception/post/camera_left_side/detections" 
+    fr_detection_topic: "/perception/post/camera_front_right/detections"  
+    fl_detection_topic: "/perception/post/camera_front_left/detections" 
+
+    
     image_reliability: 1                                              # reliability for the image topic: 0=system default, 1=Reliable, 2=Best Effort (default: 2)
     input_depth_topic: "/camera/depth/image_raw"                      # camera topic of depth images (default: /camera/depth/image_raw)
     cam_image_reliability: 1                                        # reliability for the depth image topic: 0=system default, 1=Reliable, 2=Best Effort (default: 2)

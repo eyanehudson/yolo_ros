@@ -84,6 +84,13 @@ def generate_launch_description():
 
     )
 
+    camera_info_publisher = Node(
+        package='camera_info_publisher',
+        executable='camera_info_publisher',
+        output='screen',
+
+    )
+
     # yolov5_fcam1_node = Node(   
     #     package='yolov5_ros',
     #     executable='yolov5_fcam1',
@@ -105,10 +112,11 @@ def generate_launch_description():
     launch_entity_list.extend([
         # Camera nodes:
         # camera_processing_node,
+        camera_info_publisher,
         yolo_node,
-        yolo_calc_bbox_node,
+        # yolo_calc_bbox_node,
         yolo_debug_node,
-       
+        
         # yolo_tracking_node,
         #yolov5_fcam1_node,
         # yolov5_fcam2_node
