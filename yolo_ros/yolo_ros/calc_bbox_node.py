@@ -97,33 +97,7 @@ class BboxNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] Configured")
 
 
-        # TODO: replace with cam_info
-        #temporary fix for publishing the camera_info
-        self.cam_info_pub = self.create_publisher(CameraInfo, "/perception/test/camera_front_center/camera_info", 10)
-        self.timer = self.create_timer(0.1, self.publish_camera_info)  # Publish at 10 Hz
-
-
         return TransitionCallbackReturn.SUCCESS
-
-    def publish_camera_info(self):
-        camera_info = CameraInfo()
-        camera_info.header.frame_id = 'camera_front_center'
-        camera_info.width = 2064  # Set your camera width
-        camera_info.height = 1544  # Set your camera height
-
-        # Fill in intrinsic matrix (fx, fy, cx, cy)
-        camera_info.k = [
-            1007.495139, 0.0, 1067.657077,
-            0.0, 1010.049539, 746.317718,
-            0.0, 0.0, 1.0
-        ]
-
-        # Fill in distortion parameters (k1, k2, p1, p2, k3)
-        camera_info.d = [-0.167576, 0.047559, -0.000515, 0.003160, 0.0]
-        camera_info.distortion_model = 'plumb_bob'  # Common model
-
-        self.cam_info_pub.publish(camera_info)
-        
 
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Activating...")
