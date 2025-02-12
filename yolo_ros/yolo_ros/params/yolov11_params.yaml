@@ -16,6 +16,7 @@
     augment: False                                                    # whether to enable test-time augmentation (TTA) for predictions improving detection robustness at the cost of speed (default: False)
     agnostic_nms: False                                               # whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes (default: False)
     retina_masks: False                                               # whether to use high-resolution segmentation masks if available in the model, enhancing mask quality for segmentation (default: False)
+    scale: 0.5                                                        # downsampling scale (1.0 is no downsampling) 0.5 is default
     
 
 
@@ -44,7 +45,7 @@
     target_frame: "center_of_gravity"                                 # frame to transform the 3D boxes (default: base_link)
     depth_image_units_divisor: 1000                                   # divisor to convert the depth image into meters (default: 1000)
     maximum_detection_threshold: 0.3                                  # maximum detection threshold in the z-axis (default: 0.3)
-    dallara_height: 0.75
+    dallara_height: 0.75    #TODO: Test 4 ft
     box_lateral_size: 2.2
     box_long_size: 5.0   
     box_height: 0.8
