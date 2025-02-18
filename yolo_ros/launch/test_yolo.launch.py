@@ -114,7 +114,7 @@ def generate_launch_description():
         # camera_processing_node,
         camera_info_publisher,
         yolo_node,
-        # yolo_calc_bbox_node,
+        yolo_calc_bbox_node,
         yolo_debug_node,
         
         # yolo_tracking_node,

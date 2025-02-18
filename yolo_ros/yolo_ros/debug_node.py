@@ -56,7 +56,7 @@ class DebugNode(LifecycleNode):
         # declare params
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.RELIABLE)
         self.declare_parameter("undistort", True)
-        self.declare_parameter("scale")
+        self.declare_parameter("scale", 0.5)
 
         self.declare_parameter("fc_input_topic", "/perception/camera_front_center/image")
         self.declare_parameter("rc_input_topic", "/perception/camera_rear_center/image")
@@ -91,6 +91,15 @@ class DebugNode(LifecycleNode):
         self.ls_input_topic = self.get_parameter("ls_input_topic").value
         self.fr_input_topic = self.get_parameter("fr_input_topic").value
         self.fl_input_topic = self.get_parameter("fl_input_topic").value
+
+        self.camera_topics = {
+            'camera_front_center' : self.fc_input_topic,
+            'camera_rear_center' : self.rc_input_topic,
+            'camera_right_side' : self.rs_input_topic,
+            'camera_left_side' : self.ls_input_topic,
+            'camera_front_right' : self.fr_input_topic,
+            'camera_front_left' : self.fl_input_topic,
+        }
 
         self.fc_detection_topic = self.get_parameter("fc_detection_topic").value
         self.rc_detection_topic = self.get_parameter("rc_detection_topic").value
@@ -155,82 +164,47 @@ class DebugNode(LifecycleNode):
             CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
         )
 
-        # camera subs
-        self.fc_image_sub = message_filters.Subscriber(
-            self, Image, self.fc_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.rc_image_sub = message_filters.Subscriber(
-            self, Image, self.rc_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.rs_image_sub = message_filters.Subscriber(
-            self, Image, self.rs_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.ls_image_sub = message_filters.Subscriber(
-            self, Image, self.ls_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.fr_image_sub = message_filters.Subscriber(
-            self, Image, self.fr_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.fl_image_sub = message_filters.Subscriber(
-            self, Image, self.fl_input_topic, qos_profile=self.image_qos_profile
-        )
+        # Create only active camera subscribers
+        self.subscribers = []
+        self.active_cam_names = []
+        self.active_detections = []
+        self.synchronizers = []
 
-        # detection subs 
-        self.fc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
-        )
-        self.rc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_rear_center/detections", qos_profile=10
-        )
-        self.rs_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_right_side/detections", qos_profile=10
-        )
-        self.ls_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_left_side/detections", qos_profile=10
-        )
-        self.fr_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_right/detections", qos_profile=10
-        )
-        self.fl_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_left/detections", qos_profile=10
-        )
+        for name, topic in self.camera_topics.items():
+            if self.is_topic_active(topic):  # Only subscribe if the camera topic is active
+                cam_sub = message_filters.Subscriber(self, Image, topic, qos_profile=self.image_qos_profile)
+                self.subscribers.append(cam_sub)
+                self.active_cam_names.append(name)
+                self.get_logger().info(f"Subscribed to {topic}")
 
-        
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fc_image_sub, self.fc_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+                # Subscribe to the corresponding detection topic
+                detection_topic = f"/perception/post/{name}/detections"
+                det_sub = message_filters.Subscriber(self, DetectionArray, detection_topic, qos_profile=10)
+                self.active_detections.append((cam_sub, det_sub))
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.rc_image_sub, self.rc_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
-        
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.rs_image_sub, self.rs_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        self.get_logger().info(f"Subscribed cameras: {self.active_cam_names}")
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.ls_image_sub, self.ls_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        # Create synchronizers for only active camera-detection pairs
+        for cam_sub, det_sub in self.active_detections:
+            sync = message_filters.ApproximateTimeSynchronizer((cam_sub, det_sub), 10, 0.5)
+            sync.registerCallback(self.detections_cb)
+            self.get_logger().info(f"Synchronizer created for {cam_sub} and {det_sub}")
+            self.synchronizers.append(sync)
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fr_image_sub, self.fr_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        self.get_logger().info(f"Active synchronizers: {len(self.synchronizers)}")
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fl_image_sub, self.fl_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
 
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
 
         return TransitionCallbackReturn.SUCCESS
+    
+    def is_topic_active(self, topic_name):
+        # Check if a topic is actively being published 
+        topic_list = [topic for topic, _ in self.get_topic_names_and_types()]
+        
+        return topic_name in topic_list  # Check exact match
 
     def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Deactivating...")
@@ -567,7 +541,7 @@ class DebugNode(LifecycleNode):
 
         # downsample image
         new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_AREA)
+        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
         
 
         # Get image size
@@ -606,7 +580,7 @@ class DebugNode(LifecycleNode):
 
         # downsample image
         new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_AREA)
+        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
 
         if self.cam_size_done < 6: # get optimal camera matrix only once
                 self.get_dst_map(msg)
@@ -664,17 +638,15 @@ class DebugNode(LifecycleNode):
         cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, "bgr8")
         clock = Clock()
         start_time = clock.now()
-        
 
         # downsample image
         new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_AREA)
+        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
 
         end_time = clock.now()
         duration_ns = end_time.nanoseconds - start_time.nanoseconds
         duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
-        self.get_logger().info(f"downsample Function duration: {duration_s:.6f} seconds")
-
+        
         # if unndistort is enabled and cam info is stored, then undistort the image
         if self.undistort and self.cam_info_done == 6:
             self.undistort_image(img_msg)

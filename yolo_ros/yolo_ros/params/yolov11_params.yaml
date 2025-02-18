@@ -2,7 +2,7 @@
 /**:
   ros__parameters: 
     model_type: "YOLO"                                                # Ultralytics model type (default: YOLO)
-    model: "yolov11_best_3JAN.pt"                                     # YOLO model (default: yolov8m.pt)
+    model: "yolov11_best_18FEB.pt"                                     # YOLO model (default: yolov8m.pt)
     tracker: "bytetrack.yaml"                                         # tracker file (default: bytetrack.yaml)
     device: "cuda:0"                                                  # GPU/CUDA (default: cuda:0)
     enable:  True                                                     # whether to start YOLO enabled (default: True)
@@ -11,7 +11,7 @@
     iou: 0.7                                                          # intersection Over Union (IoU) threshold for Non-Maximum Suppression (NMS) (default: 0.7)
     imgsz_height: 640                                                 # image height for inference (default: 480)
     imgsz_width: 640                                                  # image width for inference (default: 640)
-    half: False                                                       # whether to enable half-precision (FP16) inference speeding up model inference with minimal impact on accuracy (default: False)
+    half: True                                                       # whether to enable half-precision (FP16) inference speeding up model inference with minimal impact on accuracy (default: False)
     max_det: 3                                                        # maximum number of detections allowed per image (default: 300)
     augment: False                                                    # whether to enable test-time augmentation (TTA) for predictions improving detection robustness at the cost of speed (default: False)
     agnostic_nms: False                                               # whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes (default: False)
@@ -45,7 +45,7 @@
     target_frame: "center_of_gravity"                                 # frame to transform the 3D boxes (default: base_link)
     depth_image_units_divisor: 1000                                   # divisor to convert the depth image into meters (default: 1000)
     maximum_detection_threshold: 0.3                                  # maximum detection threshold in the z-axis (default: 0.3)
-    dallara_height: 0.75    #TODO: Test 4 ft
+    dallara_height: 0.9 #1.22 #0.75    #TODO: Test 4 ft
     box_lateral_size: 2.2
     box_long_size: 5.0   
     box_height: 0.8
