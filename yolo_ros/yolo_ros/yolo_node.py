@@ -31,6 +31,7 @@ from typing import List, Dict
 from cv_bridge import CvBridge
 
 import numpy as np
+import time
 
 import rclpy
 from rclpy.qos import QoSProfile
@@ -56,7 +57,7 @@ from message_filters import Subscriber, ApproximateTimeSynchronizer
 
 
 from std_srvs.srv import SetBool
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from yolo_msgs.msg import Point2D
 from yolo_msgs.msg import BoundingBox2D
 from yolo_msgs.msg import Mask
@@ -181,9 +182,11 @@ class YoloNode(LifecycleNode):
         self.fr_pub = self.create_lifecycle_publisher(DetectionArray, self.fr_detection_topic, 10)
         self.fl_pub = self.create_lifecycle_publisher(DetectionArray, self.fl_detection_topic, 10)
 
-        # set boolean flags
+        # set flags
         self.cam_info_done = 0
         self.cam_size_done = 0
+        self.last_callback_time = 0  # Track last execution time
+
 
         self.cv_bridge = CvBridge()
 
@@ -234,9 +237,6 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"Subscribed cameras are {self.active_cam_names}")
 
 
-
-
-
         # Camera info topic subscribers 
         self.fc_cam_info_sub = self.create_subscription(
             CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
@@ -257,8 +257,8 @@ class YoloNode(LifecycleNode):
             CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
         )
 
-        # Synchronization only when multiple cameras are active
-        if len(self.subscribers) > 1:
+        # Synchronization only when at least one camera is active
+        if len(self.subscribers) > 0:
             self.sync = message_filters.ApproximateTimeSynchronizer(self.subscribers, queue_size=10, slop=0.2)
             self.sync.registerCallback(self.wrapped_callback)
             if len(self.subscribers) < 6:
@@ -348,9 +348,23 @@ class YoloNode(LifecycleNode):
 
     
     def wrapped_callback(self, *images):
-        # Convert positional arguments (*args) into named keyword arguments (**kwargs) 
-        kwargs = {name: img for name, img in zip(self.active_cam_names, images)}
-        self.image_cb(**kwargs)  # Call image_cb with named arguments
+        current_time = time.time()
+        time_since_last_callback = current_time - self.last_callback_time
+        # self.get_logger().info(f"callback at {1/(time_since_last_callback):.3f} Hz")
+
+        if time_since_last_callback < 0.045: #22hz
+            # self.get_logger().info(f"returning at {(time_since_last_callback):.3f} sec")
+            return
+      
+        else:
+            # Convert positional arguments (*args) into named keyword arguments (**kwargs)
+            self.get_logger().info(f"running callback at {1/(time_since_last_callback):.3f} hz")
+
+            kwargs = {name: img for name, img in zip(self.active_cam_names, images)}
+            self.image_cb(**kwargs)  # Call image_cb with named arguments
+            # self.get_logger().info(f"finished at {(time.time() - self.last_callback_time):.3f} sec")
+
+        self.last_callback_time = current_time
 
     def enable_cb(
         self, request: SetBool.Request, response: SetBool.Response
@@ -481,7 +495,6 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] getting {cam_info.header.frame_id} camera info")
         self.get_logger().info(f"[{self.get_name()}] cam info is at {self.cam_info_done+1}")
 
-        
         # kill the subscriber
         if cam_info.header.frame_id == "camera_front_center" and self.fc_cam_info_sub:  # front center camera
             self.fc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
@@ -489,35 +502,30 @@ class YoloNode(LifecycleNode):
             self.destroy_subscription(self.fc_cam_info_sub)
             self.fc_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_rear_center" and self.rc_cam_info_sub: # rear center camera
             self.rc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rc_cam_info_sub)
             self.rc_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
             self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rs_cam_info_sub)
             self.rs_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
             self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.ls_cam_info_sub)
             self.ls_cam_info_sub = None
-            self.cam_info_done += 1
-            
+            self.cam_info_done += 1   
         elif cam_info.header.frame_id == "camera_front_right" and self.fr_cam_info_sub: # front right camera
             self.fr_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fr_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.fr_cam_info_sub)
             self.fr_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_front_left" and self.fl_cam_info_sub: # front left camera
             self.fl_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fl_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
@@ -559,7 +567,6 @@ class YoloNode(LifecycleNode):
 
     def undistort_image(self, msg: Image, cv_image: np.ndarray):
         
-
         if self.cam_size_done < 6: # get optimal camera matrix only once
                 self.get_dst_map(msg, cv_image)
                 self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
@@ -567,46 +574,26 @@ class YoloNode(LifecycleNode):
         else:
             # get camera info
             if msg.header.frame_id == "camera_front_center": 
-                k_mtx = self.fc_k_mtx
-                d_mtx = self.fc_d_mtx
-                new_camera_mtx = self.fc_new_camera_mtx
                 roi = self.fc_roi
                 map1, map2 = self.fc_map1, self.fc_map2
             if msg.header.frame_id == "camera_rear_center": 
-                k_mtx = self.rc_k_mtx
-                d_mtx = self.rc_d_mtx
-                new_camera_mtx = self.rc_new_camera_mtx
                 roi = self.rc_roi
                 map1, map2 = self.rc_map1, self.rc_map2
             if msg.header.frame_id == "camera_right_side": 
-                k_mtx = self.rs_k_mtx
-                d_mtx = self.rs_d_mtx
-                new_camera_mtx = self.rs_new_camera_mtx
                 roi = self.rs_roi
                 map1, map2 = self.rs_map1, self.rs_map2
             if msg.header.frame_id == "camera_left_side": 
-                k_mtx = self.ls_k_mtx
-                d_mtx = self.ls_d_mtx
-                new_camera_mtx = self.ls_new_camera_mtx
                 roi = self.ls_roi
                 map1, map2 = self.ls_map1, self.ls_map2
             if msg.header.frame_id == "camera_front_right": 
-                k_mtx = self.fr_k_mtx
-                d_mtx = self.fr_d_mtx
-                new_camera_mtx = self.fr_new_camera_mtx
                 roi = self.fr_roi
                 map1, map2 = self.fr_map1, self.fr_map2
             if msg.header.frame_id == "camera_front_left": 
-                k_mtx = self.fl_k_mtx
-                d_mtx = self.fl_d_mtx
-                new_camera_mtx = self.fl_new_camera_mtx
                 roi = self.fl_roi
                 map1, map2 = self.fl_map1, self.fl_map2
 
-
             # undistort the image before running YOLO
             dst = cv2.remap(cv_image, map1, map2, cv2.INTER_NEAREST) # TODO: If bad quality, change to INTER_LINEAR
-            # dst = cv2.undistort(cv_image, k_mtx, d_mtx, None, new_camera_mtx)
 
             # crop the image
             x, y, w, h = roi 
@@ -650,8 +637,8 @@ class YoloNode(LifecycleNode):
 
                 end_time = clock.now()
                 duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
-                # self.get_logger().info(f"cv_image convert and downsample Function duration: {duration_s:.6f} seconds")
+                duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+                # self.get_logger().info(f"cv_image convert and downsample Function duration: {duration_ms:.3f} ms")
 
 
                 # if unndistort is enabled and cam info is stored, then undistort the image
@@ -663,8 +650,8 @@ class YoloNode(LifecycleNode):
                     end_time = clock.now()
                     # self.get_logger().info(f"[{self.get_name()}] End processing {msg.header.frame_id} at {end_time.nanoseconds} nanoseconds")
                     duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                    duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
-                    # self.get_logger().info(f"undistort Function duration: {duration_s:.6f} seconds")
+                    duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+                    # self.get_logger().info(f"undistort Function duration: {duration_ms:.3f} ms")
 
                     if self.cam_size_done == 7:
                         # predict with undist
@@ -720,8 +707,8 @@ class YoloNode(LifecycleNode):
                 results: Results = results[0].cuda()
                 end_time = clock.now()
                 duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
-                # self.get_logger().info(f"got results Function duration: {duration_s:.6f} seconds")
+                duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+                # self.get_logger().info(f"got results Function duration: {duration_ms:.3f} ms")
 
                 if results.boxes or results.obb:
                     hypothesis = self.parse_hypothesis(results)
@@ -758,8 +745,8 @@ class YoloNode(LifecycleNode):
 
                 end_time = clock.now()
                 duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
-                # self.get_logger().info(f"create detecton array Function duration: {duration_s:.6f} seconds")
+                duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+                # self.get_logger().info(f"create detecton array Function duration: {duration_ms:.3f} ms")
                 
                 # publish detections
                 detections_msg.header = msg.header
