@@ -213,6 +213,7 @@ class YoloNode(LifecycleNode):
                 SetClasses, "set_classes", self.set_classes_cb
             )
 
+<<<<<<< Updated upstream
         # camera topic subscribers
         self.fc_sub = self.create_subscription(
             Image, self.fc_input_topic, self.image_cb, self.image_qos_profile
@@ -232,6 +233,40 @@ class YoloNode(LifecycleNode):
         self.fl_sub = self.create_subscription(
             Image, self.fl_input_topic, self.image_cb, self.image_qos_profile
         )
+=======
+        # Create only active camera subscribers
+        self.subscribers = []
+        self.active_cam_names = []
+        for name, topic in self.camera_topics.items():
+            if self.is_topic_active(topic):  # Only subscribe if the topic is active
+                sub = message_filters.Subscriber(self, Image, topic, qos_profile=self.image_qos_profile)
+                self.subscribers.append(sub)
+                self.active_cam_names.append(name)
+                self.get_logger().info(f"Subscribed to {topic}")
+        self.get_logger().info(f"Subscribed cameras are {self.active_cam_names}")
+
+
+        # # Camera info topic subscribers 
+        # self.fc_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
+        # )
+        # self.rc_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_rear_center/camera_info", self.get_camera_info, 10
+        # )
+        # self.rs_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_right_side/camera_info", self.get_camera_info, 10
+        # )
+        # self.ls_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_left_side/camera_info", self.get_camera_info, 10
+        # )
+        # self.fr_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_right/camera_info", self.get_camera_info, 10
+        # )
+        # self.fl_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
+        # )
+
+>>>>>>> Stashed changes
         # Camera info topic subscribers 
         self.fc_cam_info_sub = self.create_subscription(
             CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
@@ -473,14 +508,20 @@ class YoloNode(LifecycleNode):
             self.destroy_subscription(self.rc_cam_info_sub)
             self.rc_cam_info_sub = None
             self.cam_info_done += 1
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
         elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
             self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rs_cam_info_sub)
             self.rs_cam_info_sub = None
             self.cam_info_done += 1
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
         elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
             self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
@@ -502,6 +543,7 @@ class YoloNode(LifecycleNode):
             self.fl_cam_info_sub = None
             self.cam_info_done += 1
 
+<<<<<<< Updated upstream
     def get_dst_map(self, msg: Image):   # function to get cam size, optimal new matrix, and undist map
         # convert image
         cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
@@ -511,6 +553,10 @@ class YoloNode(LifecycleNode):
         new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
         cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_AREA)
 
+=======
+    def get_dst_map(self, msg: Image, cv_image: np.ndarray):   # function to get cam size, optimal new matrix, and undist map
+        
+>>>>>>> Stashed changes
         # Get image size
         h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
         R = np.eye(3, dtype=np.float32)  # Rectification matrix (Identity if not stereo)
@@ -540,6 +586,7 @@ class YoloNode(LifecycleNode):
             self.fl_map1, self.fl_map2 = cv2.initUndistortRectifyMap(self.fl_k_mtx, self.fl_d_mtx, R, self.fl_new_camera_mtx, (w,h), cv2.CV_32FC1)     #TODO: Add stereo rectification here
             self.cam_size_done += 1
 
+<<<<<<< Updated upstream
     def undistort_image(self, msg: Image):
         # convert image
         cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
@@ -551,6 +598,10 @@ class YoloNode(LifecycleNode):
         cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_AREA)
 
 
+=======
+    def undistort_image(self, msg: Image, cv_image: np.ndarray):
+        
+>>>>>>> Stashed changes
         if self.cam_size_done < 6: # get optimal camera matrix only once
                 self.get_dst_map(msg)
                 self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
@@ -558,9 +609,12 @@ class YoloNode(LifecycleNode):
         else:
             # get camera info
             if msg.header.frame_id == "camera_front_center": 
+<<<<<<< Updated upstream
                 k_mtx = self.fc_k_mtx
                 d_mtx = self.fc_d_mtx
                 new_camera_mtx = self.fc_new_camera_mtx
+=======
+>>>>>>> Stashed changes
                 roi = self.fc_roi
                 map1, map2 = self.fc_map1, self.fc_map2
             if msg.header.frame_id == "camera_rear_center": 
@@ -570,6 +624,7 @@ class YoloNode(LifecycleNode):
                 roi = self.rc_roi
                 map1, map2 = self.rc_map1, self.rc_map2
             if msg.header.frame_id == "camera_right_side": 
+<<<<<<< Updated upstream
                 k_mtx = self.rs_k_mtx
                 d_mtx = self.rs_d_mtx
                 new_camera_mtx = self.rs_new_camera_mtx
@@ -579,6 +634,11 @@ class YoloNode(LifecycleNode):
                 k_mtx = self.ls_k_mtx
                 d_mtx = self.ls_d_mtx
                 new_camera_mtx = self.ls_new_camera_mtx
+=======
+                roi = self.rs_roi
+                map1, map2 = self.rs_map1, self.rs_map2
+            if msg.header.frame_id == "camera_left_side": 
+>>>>>>> Stashed changes
                 roi = self.ls_roi
                 map1, map2 = self.ls_map1, self.ls_map2
             if msg.header.frame_id == "camera_front_right": 
@@ -610,6 +670,25 @@ class YoloNode(LifecycleNode):
             clock = Clock()
             start_time = clock.now()
             # self.get_logger().info(f"[{self.get_name()}] Start processing {msg.header.frame_id} at {start_time.nanoseconds} nanoseconds")
+<<<<<<< Updated upstream
+=======
+
+            # Mapping of frame IDs to publisher objects
+            camera_publishers = {
+                "camera_front_center": self.fc_pub,
+                "camera_rear_center": self.rc_pub,
+                "camera_right_side": self.rs_pub,
+                "camera_left_side": self.ls_pub,
+                "camera_front_right": self.fr_pub,
+                "camera_front_left": self.fl_pub,
+            }
+            final_pub = []
+            final_det = []
+            batch = []
+            image_batch = []
+            msg_batch = []
+
+>>>>>>> Stashed changes
             
             # convert image
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
