@@ -35,7 +35,7 @@ import message_filters
 from cv_bridge import CvBridge
 from ultralytics.utils.plotting import Annotator, colors
 
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from yolo_msgs.msg import BoundingBox2D
@@ -144,24 +144,43 @@ class DebugNode(LifecycleNode):
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Activating...")
        
-        # Camera info topic subscribers 
+        # # Camera info topic subscribers 
+        # self.fc_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
+        # )
+        # self.rc_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_rear_center/camera_info", self.get_camera_info, 10
+        # )
+        # self.rs_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_right_side/camera_info", self.get_camera_info, 10
+        # )
+        # self.ls_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_left_side/camera_info", self.get_camera_info, 10
+        # )
+        # self.fr_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_right/camera_info", self.get_camera_info, 10
+        # )
+        # self.fl_cam_info_sub = self.create_subscription(
+        #     CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
+        # )
+                        # Camera info topic subscribers 
         self.fc_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
+            CameraInfo, "/vehicle_8/camera/front_left_center/camera_info", self.get_camera_info, 10
         )
         self.rc_cam_info_sub = self.create_subscription(
             CameraInfo, "/perception/test/camera_rear_center/camera_info", self.get_camera_info, 10
         )
         self.rs_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_right_side/camera_info", self.get_camera_info, 10
+            CameraInfo, "/vehicle_8/camera/rear_right/camera_info", self.get_camera_info, 10
         )
         self.ls_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_left_side/camera_info", self.get_camera_info, 10
+            CameraInfo, "/vehicle_8/camera/rear_left/camera_info", self.get_camera_info, 10
         )
         self.fr_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_right/camera_info", self.get_camera_info, 10
+            CameraInfo, "/vehicle_8/camera/front_right/camera_info", self.get_camera_info, 10
         )
         self.fl_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
+            CameraInfo, "/vehicle_8/camera/front_left/camera_info", self.get_camera_info, 10
         )
 
         # Create only active camera subscribers
@@ -172,7 +191,7 @@ class DebugNode(LifecycleNode):
 
         for name, topic in self.camera_topics.items():
             if self.is_topic_active(topic):  # Only subscribe if the camera topic is active
-                cam_sub = message_filters.Subscriber(self, Image, topic, qos_profile=self.image_qos_profile)
+                cam_sub = message_filters.Subscriber(self, CompressedImage, topic, qos_profile=self.image_qos_profile)
                 self.subscribers.append(cam_sub)
                 self.active_cam_names.append(name)
                 self.get_logger().info(f"Subscribed to {topic}")
@@ -492,41 +511,36 @@ class DebugNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] cam info is at {self.cam_info_done+1}")
 
         # kill the subscriber
-        if cam_info.header.frame_id == "camera_front_center" and self.fc_cam_info_sub:  # front center camera
+        if cam_info.header.frame_id == "camera_front_1" and self.fc_cam_info_sub:  # front center camera
             self.fc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.fc_cam_info_sub)
             self.fc_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_rear_center" and self.rc_cam_info_sub: # rear center camera
             self.rc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rc_cam_info_sub)
             self.rc_cam_info_sub = None
             self.cam_info_done += 1
-
-        elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
+        elif cam_info.header.frame_id == "camera_rear_right" and self.rs_cam_info_sub: # right side camera
             self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rs_cam_info_sub)
             self.rs_cam_info_sub = None
             self.cam_info_done += 1
-
-        elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
+        elif cam_info.header.frame_id == "camera_rear_left" and self.ls_cam_info_sub: # left side camera
             self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.ls_cam_info_sub)
             self.ls_cam_info_sub = None
-            self.cam_info_done += 1
-            
+            self.cam_info_done += 1   
         elif cam_info.header.frame_id == "camera_front_right" and self.fr_cam_info_sub: # front right camera
             self.fr_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fr_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.fr_cam_info_sub)
             self.fr_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_front_left" and self.fl_cam_info_sub: # front left camera
             self.fl_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fl_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
@@ -534,21 +548,13 @@ class DebugNode(LifecycleNode):
             self.fl_cam_info_sub = None
             self.cam_info_done += 1
 
-    def get_dst_map(self, msg: Image):   # function to get cam size, optimal new matrix, and undist map
-        # convert image
-        cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-
-        # downsample image
-        new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
-        
-
+    def get_dst_map(self, msg: CompressedImage, cv_image: np.ndarray):   # function to get cam size, optimal new matrix, and undist map
+ 
         # Get image size
         h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
         R = np.eye(3, dtype=np.float32)  # Rectification matrix (Identity if not stereo)
 
-        if msg.header.frame_id == "camera_front_center":
+        if msg.header.frame_id == "camera_front_1":
             self.fc_new_camera_mtx, self.fc_roi = cv2.getOptimalNewCameraMatrix(self.fc_k_mtx, self.fc_d_mtx, (w, h), 0, (w, h))   
             self.fc_map1, self.fc_map2 = cv2.initUndistortRectifyMap(self.fc_k_mtx, self.fc_d_mtx, R, self.fc_new_camera_mtx, (w,h), cv2.CV_32FC1)     
             self.cam_size_done += 1
@@ -556,11 +562,11 @@ class DebugNode(LifecycleNode):
             self.rc_new_camera_mtx, self.rc_roi = cv2.getOptimalNewCameraMatrix(self.rc_k_mtx, self.rc_d_mtx, (w, h), 0, (w, h))
             self.rc_map1, self.rc_map2 = cv2.initUndistortRectifyMap(self.rc_k_mtx, self.rc_d_mtx, R, self.rc_new_camera_mtx, (w,h), cv2.CV_32FC1)     
             self.cam_size_done += 1
-        elif msg.header.frame_id == "camera_right_side":
+        elif msg.header.frame_id == "camera_rear_right":
             self.rs_new_camera_mtx, self.rs_roi = cv2.getOptimalNewCameraMatrix(self.rs_k_mtx, self.rs_d_mtx, (w, h), 0, (w, h))
             self.rs_map1, self.rs_map2 = cv2.initUndistortRectifyMap(self.rs_k_mtx, self.rs_d_mtx, R,  self.rs_new_camera_mtx, (w,h), cv2.CV_32FC1)     
             self.cam_size_done += 1
-        elif msg.header.frame_id == "camera_left_side":
+        elif msg.header.frame_id == "camera_rear_left":
             self.ls_new_camera_mtx, self.ls_roi = cv2.getOptimalNewCameraMatrix(self.ls_k_mtx, self.ls_d_mtx, (w, h), 0, (w, h))
             self.ls_map1, self.ls_map2 = cv2.initUndistortRectifyMap(self.ls_k_mtx, self.ls_d_mtx, R, self.ls_new_camera_mtx, (w,h), cv2.CV_32FC1)     
             self.cam_size_done += 1
@@ -573,75 +579,51 @@ class DebugNode(LifecycleNode):
             self.fl_map1, self.fl_map2 = cv2.initUndistortRectifyMap(self.fl_k_mtx, self.fl_d_mtx, R, self.fl_new_camera_mtx, (w,h), cv2.CV_32FC1)     #TODO: Add stereo rectification here
             self.cam_size_done += 1
 
-    def undistort_image(self, msg: Image):
-        # convert image
-        cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-
-        # downsample image
-        new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
+    def undistort_image(self, msg: CompressedImage, cv_image: np.ndarray):
 
         if self.cam_size_done < 6: # get optimal camera matrix only once
-                self.get_dst_map(msg)
+                self.get_dst_map(msg, cv_image)
                 self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
 
         else:
             # get camera info
-            if msg.header.frame_id == "camera_front_center": 
-                k_mtx = self.fc_k_mtx
-                d_mtx = self.fc_d_mtx
-                new_camera_mtx = self.fc_new_camera_mtx
+            if msg.header.frame_id == "camera_front_1": 
                 roi = self.fc_roi
                 map1, map2 = self.fc_map1, self.fc_map2
             if msg.header.frame_id == "camera_rear_center": 
-                k_mtx = self.rc_k_mtx
-                d_mtx = self.rc_d_mtx
-                new_camera_mtx = self.rc_new_camera_mtx
                 roi = self.rc_roi
                 map1, map2 = self.rc_map1, self.rc_map2
-            if msg.header.frame_id == "camera_right_side": 
-                k_mtx = self.rs_k_mtx
-                d_mtx = self.rs_d_mtx
-                new_camera_mtx = self.rs_new_camera_mtx
+            if msg.header.frame_id == "camera_rear_right": 
                 roi = self.rs_roi
                 map1, map2 = self.rs_map1, self.rs_map2
-            if msg.header.frame_id == "camera_left_side": 
-                k_mtx = self.ls_k_mtx
-                d_mtx = self.ls_d_mtx
-                new_camera_mtx = self.ls_new_camera_mtx
+            if msg.header.frame_id == "camera_rear_left": 
                 roi = self.ls_roi
                 map1, map2 = self.ls_map1, self.ls_map2
             if msg.header.frame_id == "camera_front_right": 
-                k_mtx = self.fr_k_mtx
-                d_mtx = self.fr_d_mtx
-                new_camera_mtx = self.fr_new_camera_mtx
                 roi = self.fr_roi
                 map1, map2 = self.fr_map1, self.fr_map2
             if msg.header.frame_id == "camera_front_left": 
-                k_mtx = self.fl_k_mtx
-                d_mtx = self.fl_d_mtx
-                new_camera_mtx = self.fl_new_camera_mtx
                 roi = self.fl_roi
                 map1, map2 = self.fl_map1, self.fl_map2
 
             # undistort the image before running YOLO
             dst = cv2.remap(cv_image, map1, map2, cv2.INTER_NEAREST)
-            # dst = cv2.undistort(cv_image, k_mtx, d_mtx, None, new_camera_mtx)
 
             # crop the image
             x, y, w, h = roi 
-            self.un_dist_image = dst[y:y+h,x:x+w]
+            un_dist_image = dst[y:y+h,x:x+w]
 
-    def detections_cb(self, img_msg: Image, detection_msg: DetectionArray) -> None:
+            return un_dist_image
 
-        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, "bgr8")
+    def detections_cb(self, img_msg: CompressedImage, detection_msg: DetectionArray) -> None:
+
+        cv_image = self.cv_bridge.compressed_imgmsg_to_cv2(img_msg, "bgr8")
         clock = Clock()
         start_time = clock.now()
 
-        # downsample image
-        new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
+        # # downsample image
+        # new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
+        # cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
 
         end_time = clock.now()
         duration_ns = end_time.nanoseconds - start_time.nanoseconds
@@ -649,9 +631,9 @@ class DebugNode(LifecycleNode):
         
         # if unndistort is enabled and cam info is stored, then undistort the image
         if self.undistort and self.cam_info_done == 6:
-            self.undistort_image(img_msg)
+            un_dist_image = self.undistort_image(img_msg, cv_image)
             if self.cam_size_done == 7:
-                cv_image = self.un_dist_image
+                cv_image = un_dist_image
 
         bb_marker_array = MarkerArray()
         kp_marker_array = MarkerArray()
@@ -689,7 +671,7 @@ class DebugNode(LifecycleNode):
                     kp_marker_array.markers.append(marker)
         
         # publish dbg image
-        if img_msg.header.frame_id == "camera_front_center":
+        if img_msg.header.frame_id == "camera_front_1":
             self.fc_dbg_pub.publish(
                 self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
             )
@@ -701,13 +683,13 @@ class DebugNode(LifecycleNode):
             )
             self.rc_bb_markers_pub.publish(bb_marker_array)
             # self._kp_markers_pub.publish(kp_marker_array)
-        elif img_msg.header.frame_id == "camera_right_side":
+        elif img_msg.header.frame_id == "camera_rear_right":
             self.rs_dbg_pub.publish(
                 self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
             )
             self.rs_bb_markers_pub.publish(bb_marker_array)
             # self._kp_markers_pub.publish(kp_marker_array)
-        elif img_msg.header.frame_id == "camera_left_side":
+        elif img_msg.header.frame_id == "camera_rear_left":
             self.ls_dbg_pub.publish(
                 self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
             )

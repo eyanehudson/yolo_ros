@@ -21,12 +21,12 @@
 
 
     # Camera image topics
-    fc_input_topic: "/perception/camera_front_center/image"        # camera topic of RGB images (default: /camera/rgb/image_raw)
-    rc_input_topic: "/perception/camera_rear_center/image"
-    rs_input_topic: "/perception/camera_right_side/image"
-    ls_input_topic: "/perception/camera_left_side/image"
-    fr_input_topic: "/perception/camera_front_right/image"
-    fl_input_topic: "/perception/camera_front_left/image"
+    # fc_input_topic: "/perception/camera_front_center/image"        # camera topic of RGB images (default: /camera/rgb/image_raw)
+    # rc_input_topic: "/perception/camera_rear_center/image"
+    # rs_input_topic: "/perception/camera_right_side/image"
+    # ls_input_topic: "/perception/camera_left_side/image"
+    # fr_input_topic: "/perception/camera_front_right/image"
+    # fl_input_topic: "/perception/camera_front_left/image"
 
     # fc_input_topic: "/perception/camera_front_center/image_compressed"        # camera topic of RGB images (default: /camera/rgb/image_raw)
     # rc_input_topic: "/perception/camera_rear_center/image_compressed"
@@ -34,6 +34,13 @@
     # ls_input_topic: "/perception/camera_left_side/image_compressed"
     # fr_input_topic: "/perception/camera_front_right/image_compressed"
     # fl_input_topic: "/perception/camera_front_left/image_compressed"
+
+    fc_input_topic: "/vehicle_8/camera/front_left_center/image/compressed"        # camera topic of RGB images (default: /camera/rgb/image_raw)
+    # rc_input_topic: "/vehicle_8/camera/rear_left/image/compressed"
+    rs_input_topic: "/vehicle_8/camera/rear_right/image/compressed"
+    ls_input_topic: "/vehicle_8/camera/rear_left/image/compressed"
+    fr_input_topic: "/vehicle_8/camera/front_right/image/compressed"
+    fl_input_topic: "/vehicle_8/camera/front_left/image/compressed"
     
     # Detection topics
     fc_detection_topic: "/perception/post/camera_front_center/detections" # topic for the detections 
