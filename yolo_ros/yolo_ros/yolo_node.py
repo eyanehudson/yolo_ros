@@ -115,6 +115,7 @@ class YoloNode(LifecycleNode):
         
         self.declare_parameter("undistort", True)
         self.declare_parameter("scale", 0.5)
+        self.declare_parameter("frequency", 10)
 
         self.type_to_model = {"YOLO": YOLO, "NAS": NAS, "World": YOLOWorld}
 
@@ -165,6 +166,7 @@ class YoloNode(LifecycleNode):
 
         self.undistort = self.get_parameter("undistort").value
         self.scale = self.get_parameter("scale").value
+        self.frequency = self.get_parameter("frequency").value
 
         # set image qos
         self.image_qos_profile = QoSProfile(
@@ -186,6 +188,7 @@ class YoloNode(LifecycleNode):
         self.cam_info_done = 0
         self.cam_size_done = 0
         self.last_callback_time = 0  # Track last execution time
+        self.delay = 0.99 * (1 / self.frequency) # .99 to make the function run slightly faster than the desired frequency to account for loop delay
 
 
         self.cv_bridge = CvBridge()
@@ -352,17 +355,17 @@ class YoloNode(LifecycleNode):
         time_since_last_callback = current_time - self.last_callback_time
         self.get_logger().info(f"callback at {1/(time_since_last_callback):.3f} Hz")
 
-        if time_since_last_callback < 0.09: #22hz
-            self.get_logger().info(f"returning at {(time_since_last_callback):.3f} sec")
-            return
-      
-        else:
-            # Convert positional arguments (*args) into named keyword arguments (**kwargs)
-            self.get_logger().info(f"running callback at {1/(time_since_last_callback):.3f} hz")
+        while time_since_last_callback < self.delay: #10hz
+            time.sleep(self.delay - time_since_last_callback)
+            current_time = time.time()  # Update time after sleeping
+            time_since_last_callback = current_time - self.last_callback_time  # Recalculate interval
+        
+        # Convert positional arguments (*args) into named keyword arguments (**kwargs)
+        self.get_logger().info(f"running callback at {1/(time_since_last_callback):.3f} hz")
 
-            kwargs = {name: img for name, img in zip(self.active_cam_names, images)}
-            self.image_cb(**kwargs)  # Call image_cb with named arguments
-            # self.get_logger().info(f"finished at {(time.time() - self.last_callback_time):.3f} sec")
+        kwargs = {name: img for name, img in zip(self.active_cam_names, images)}
+        self.image_cb(**kwargs)  # Call image_cb with named arguments
+        # self.get_logger().info(f"finished at {(time.time() - self.last_callback_time):.3f} sec")
 
         self.last_callback_time = current_time
 
@@ -698,14 +701,15 @@ class YoloNode(LifecycleNode):
                 self.get_logger().error(f"Error converting results to list: {e}")
                 return
 
+            end_time = clock.now()
+            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+            self.get_logger().info(f"got results Function duration: {duration_ms:.3f} ms")
+
             for result in range(len(batch)):
                 
                 results: Results = results_list[result].cuda()
                 # self.get_logger().info(f"results are {results}")
-                end_time = clock.now()
-                duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
-                self.get_logger().info(f"got results Function duration: {duration_ms:.3f} ms")
 
                 if results.boxes or results.obb:
                     hypothesis = self.parse_hypothesis(results)
@@ -713,7 +717,6 @@ class YoloNode(LifecycleNode):
 
                 # create detection msgs
                 detections_msg = DetectionArray()
-                detections_msg_empty = DetectionArray()
 
                 for i in range(len(results)):
 
@@ -727,36 +730,42 @@ class YoloNode(LifecycleNode):
                         aux_msg.bbox = boxes[i]
 
                     detections_msg.detections.append(aux_msg)
-
-                end_time = clock.now()
-                duration_ns = end_time.nanoseconds - start_time.nanoseconds
-                duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
-                self.get_logger().info(f"create detecton array Function duration: {duration_ms:.3f} ms")
                 
                 # publish detections
-                detections_msg.header = msg.header
-                detections_msg_empty.header = msg.header
-
+                detections_msg.header = msg_batch[result].header # set the header for the correct detection 
                 # Publish to the correct publisher based on frame_id
-                target_pub = camera_publishers.get(msg.header.frame_id, None)
+
+                target_pub = camera_publishers.get(msg_batch[result].header.frame_id, None)
 
                 # If we found a matching publisher, publish the detections_msg                
                 if target_pub:
                     final_pub.append(target_pub)
-                    final_det.append(detections_msg)
-                    # self.get_logger().info(f"publishing the {target_pub} detections")
-                   
+                    final_det.append(detections_msg)                   
+        
+            end_time = clock.now()
+            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+            self.get_logger().info(f"create detecton array Function duration: {duration_ms:.3f} ms")
+
+
+            # Publish not empty detections
+            for i in range(len(final_pub)):
+                final_pub[i].publish(final_det[i])
 
             # Publish empty detections_msg to all other publishers
             for frame_id, pub in camera_publishers.items():                    
                 if pub not in final_pub:
+                    detections_msg_empty = DetectionArray()
+                    detections_msg_empty.header = msg_batch[0].header
                     detections_msg_empty.header.frame_id = frame_id
                     pub.publish(detections_msg_empty)
-            for i in range(len(final_pub)):
-                final_pub[i].publish(final_det[i])
+            
+            
 
             del results
             del cv_image
+            del final_det
+            del final_pub
 
 
     def set_classes_cb(

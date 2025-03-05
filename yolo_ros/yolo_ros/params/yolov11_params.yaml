@@ -17,6 +17,7 @@
     agnostic_nms: False                                               # whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes (default: False)
     retina_masks: False                                               # whether to use high-resolution segmentation masks if available in the model, enhancing mask quality for segmentation (default: False)
     scale: 0.5                                                        # downsampling scale (1.0 is no downsampling) 0.5 is default
+    frequency: 20                                                      # frequency to publish detections (default 10hz)
     
 
 
