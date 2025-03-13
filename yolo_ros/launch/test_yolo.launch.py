@@ -90,6 +90,16 @@ def generate_launch_description():
         output='screen',
 
     )
+    camera_compressor = Node(
+        package='camera_compressor',
+        executable='camera_compressor',
+        output='screen'
+    )
+    camera_decompressor = Node(
+        package='camera_compressor',
+        executable='camera_decompressor',
+        output='screen'
+    )
 
     # yolov5_fcam1_node = Node(   
     #     package='yolov5_ros',
@@ -113,9 +123,10 @@ def generate_launch_description():
         # Camera nodes:
         # camera_processing_node,
         camera_info_publisher,
+        # camera_decompressor,
         yolo_node,
         # yolo_calc_bbox_node,
-        yolo_debug_node,
+        # yolo_debug_node,
         
         # yolo_tracking_node,
         #yolov5_fcam1_node,

@@ -29,12 +29,13 @@ from rclpy.qos import QoSReliabilityPolicy
 from rclpy.lifecycle import LifecycleNode
 from rclpy.lifecycle import TransitionCallbackReturn
 from rclpy.lifecycle import LifecycleState
+from rclpy.clock import Clock
 
 import message_filters
 from cv_bridge import CvBridge
 from ultralytics.utils.plotting import Annotator, colors
 
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from yolo_msgs.msg import BoundingBox2D
@@ -55,6 +56,7 @@ class DebugNode(LifecycleNode):
         # declare params
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.RELIABLE)
         self.declare_parameter("undistort", True)
+        self.declare_parameter("scale", 0.5)
 
         self.declare_parameter("fc_input_topic", "/perception/camera_front_center/image")
         self.declare_parameter("rc_input_topic", "/perception/camera_rear_center/image")
@@ -90,6 +92,15 @@ class DebugNode(LifecycleNode):
         self.fr_input_topic = self.get_parameter("fr_input_topic").value
         self.fl_input_topic = self.get_parameter("fl_input_topic").value
 
+        self.camera_topics = {
+            'camera_front_center' : self.fc_input_topic,
+            'camera_rear_center' : self.rc_input_topic,
+            'camera_right_side' : self.rs_input_topic,
+            'camera_left_side' : self.ls_input_topic,
+            'camera_front_right' : self.fr_input_topic,
+            'camera_front_left' : self.fl_input_topic,
+        }
+
         self.fc_detection_topic = self.get_parameter("fc_detection_topic").value
         self.rc_detection_topic = self.get_parameter("rc_detection_topic").value
         self.rs_detection_topic = self.get_parameter("rs_detection_topic").value
@@ -98,6 +109,7 @@ class DebugNode(LifecycleNode):
         self.fl_detection_topic = self.get_parameter("fl_detection_topic").value
 
         self.undistort = self.get_parameter("undistort").value
+        self.scale = self.get_parameter("scale").value
 
         # pubs
         self.fc_dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_center/dbg_image", 10)
@@ -118,10 +130,9 @@ class DebugNode(LifecycleNode):
         self.fl_dbg_pub = self.create_publisher(Image, "/perception/post/camera_front_left/dbg_image", 10)
         self.fl_bb_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_left/dgb_bb_markers", 10)
         
-        # self._kp_markers_pub = self.create_publisher(MarkerArray, "/perception/post/camera_front_center/dgb_kp_markers", 10)
-
-        # get boolean flags
+        # get flags
         self.cam_info_done = 0
+        self.cam_size_done = 0
 
         super().on_configure(state)
         self.get_logger().info(f"[{self.get_name()}] Configured")
@@ -151,82 +162,47 @@ class DebugNode(LifecycleNode):
             CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
         )
 
-        # camera subs
-        self.fc_image_sub = message_filters.Subscriber(
-            self, Image, self.fc_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.rc_image_sub = message_filters.Subscriber(
-            self, Image, self.rc_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.rs_image_sub = message_filters.Subscriber(
-            self, Image, self.rs_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.ls_image_sub = message_filters.Subscriber(
-            self, Image, self.ls_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.fr_image_sub = message_filters.Subscriber(
-            self, Image, self.fr_input_topic, qos_profile=self.image_qos_profile
-        )
-        self.fl_image_sub = message_filters.Subscriber(
-            self, Image, self.fl_input_topic, qos_profile=self.image_qos_profile
-        )
+        # Create only active camera subscribers
+        self.subscribers = []
+        self.active_cam_names = []
+        self.active_detections = []
+        self.synchronizers = []
 
-        # detection subs 
-        self.fc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
-        )
-        self.rc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_rear_center/detections", qos_profile=10
-        )
-        self.rs_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_right_side/detections", qos_profile=10
-        )
-        self.ls_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_left_side/detections", qos_profile=10
-        )
-        self.fr_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_right/detections", qos_profile=10
-        )
-        self.fl_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_left/detections", qos_profile=10
-        )
+        for name, topic in self.camera_topics.items():
+            if self.is_topic_active(topic):  # Only subscribe if the camera topic is active
+                cam_sub = message_filters.Subscriber(self, Image, topic, qos_profile=self.image_qos_profile)
+                self.subscribers.append(cam_sub)
+                self.active_cam_names.append(name)
+                self.get_logger().info(f"Subscribed to {topic}")
 
-        
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fc_image_sub, self.fc_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+                # Subscribe to the corresponding detection topic
+                detection_topic = f"/perception/post/{name}/detections"
+                det_sub = message_filters.Subscriber(self, DetectionArray, detection_topic, qos_profile=10)
+                self.active_detections.append((cam_sub, det_sub))
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.rc_image_sub, self.rc_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
-        
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.rs_image_sub, self.rs_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        self.get_logger().info(f"Subscribed cameras: {self.active_cam_names}")
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.ls_image_sub, self.ls_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        # Create synchronizers for only active camera-detection pairs
+        for cam_sub, det_sub in self.active_detections:
+            sync = message_filters.ApproximateTimeSynchronizer((cam_sub, det_sub), 10, 0.5)
+            sync.registerCallback(self.detections_cb)
+            # self.get_logger().info(f"Synchronizer created for {cam_sub} and {det_sub}")
+            self.synchronizers.append(sync)
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fr_image_sub, self.fr_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        self.get_logger().info(f"Active synchronizers: {len(self.synchronizers)}")
 
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.fl_image_sub, self.fl_detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
 
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
 
         return TransitionCallbackReturn.SUCCESS
+    
+    def is_topic_active(self, topic_name):
+        # Check if a topic is actively being published 
+        topic_list = [topic for topic, _ in self.get_topic_names_and_types()]
+        
+        return topic_name in topic_list  # Check exact match
 
     def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Deactivating...")
@@ -520,35 +496,30 @@ class DebugNode(LifecycleNode):
             self.destroy_subscription(self.fc_cam_info_sub)
             self.fc_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_rear_center" and self.rc_cam_info_sub: # rear center camera
             self.rc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rc_cam_info_sub)
             self.rc_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
             self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.rs_cam_info_sub)
             self.rs_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
             self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.ls_cam_info_sub)
             self.ls_cam_info_sub = None
-            self.cam_info_done += 1
-            
+            self.cam_info_done += 1   
         elif cam_info.header.frame_id == "camera_front_right" and self.fr_cam_info_sub: # front right camera
             self.fr_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fr_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
             self.destroy_subscription(self.fr_cam_info_sub)
             self.fr_cam_info_sub = None
             self.cam_info_done += 1
-
         elif cam_info.header.frame_id == "camera_front_left" and self.fl_cam_info_sub: # front left camera
             self.fl_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fl_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
@@ -556,47 +527,92 @@ class DebugNode(LifecycleNode):
             self.fl_cam_info_sub = None
             self.cam_info_done += 1
 
+    def get_dst_map(self, msg: Image, cv_image: np.ndarray):   # function to get cam size, optimal new matrix, and undist map
+ 
+        # Get image size
+        h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
+        R = np.eye(3, dtype=np.float32)  # Rectification matrix (Identity if not stereo)
+
+        if msg.header.frame_id == "camera_front_center":
+            self.fc_new_camera_mtx, self.fc_roi = cv2.getOptimalNewCameraMatrix(self.fc_k_mtx, self.fc_d_mtx, (w, h), 0, (w, h))   
+            self.fc_map1, self.fc_map2 = cv2.initUndistortRectifyMap(self.fc_k_mtx, self.fc_d_mtx, R, self.fc_new_camera_mtx, (w,h), cv2.CV_32FC1)     
+            self.cam_size_done += 1
+        elif msg.header.frame_id == "camera_rear_center":
+            self.rc_new_camera_mtx, self.rc_roi = cv2.getOptimalNewCameraMatrix(self.rc_k_mtx, self.rc_d_mtx, (w, h), 0, (w, h))
+            self.rc_map1, self.rc_map2 = cv2.initUndistortRectifyMap(self.rc_k_mtx, self.rc_d_mtx, R, self.rc_new_camera_mtx, (w,h), cv2.CV_32FC1)     
+            self.cam_size_done += 1
+        elif msg.header.frame_id == "camera_right_side":
+            self.rs_new_camera_mtx, self.rs_roi = cv2.getOptimalNewCameraMatrix(self.rs_k_mtx, self.rs_d_mtx, (w, h), 0, (w, h))
+            self.rs_map1, self.rs_map2 = cv2.initUndistortRectifyMap(self.rs_k_mtx, self.rs_d_mtx, R,  self.rs_new_camera_mtx, (w,h), cv2.CV_32FC1)     
+            self.cam_size_done += 1
+        elif msg.header.frame_id == "camera_left_side":
+            self.ls_new_camera_mtx, self.ls_roi = cv2.getOptimalNewCameraMatrix(self.ls_k_mtx, self.ls_d_mtx, (w, h), 0, (w, h))
+            self.ls_map1, self.ls_map2 = cv2.initUndistortRectifyMap(self.ls_k_mtx, self.ls_d_mtx, R, self.ls_new_camera_mtx, (w,h), cv2.CV_32FC1)     
+            self.cam_size_done += 1
+        elif msg.header.frame_id == "camera_front_right":
+            self.fr_new_camera_mtx, self.fr_roi = cv2.getOptimalNewCameraMatrix(self.fr_k_mtx, self.fr_d_mtx, (w, h), 0, (w, h))
+            self.fr_map1, self.fr_map2 = cv2.initUndistortRectifyMap(self.fr_k_mtx, self.fr_d_mtx, R, self.fr_new_camera_mtx, (w,h), cv2.CV_32FC1)     #TODO: Add stereo rectification here    
+            self.cam_size_done += 1
+        elif msg.header.frame_id == "camera_front_left":
+            self.fl_new_camera_mtx, self.fl_roi = cv2.getOptimalNewCameraMatrix(self.fl_k_mtx, self.fl_d_mtx, (w, h), 0, (w, h))
+            self.fl_map1, self.fl_map2 = cv2.initUndistortRectifyMap(self.fl_k_mtx, self.fl_d_mtx, R, self.fl_new_camera_mtx, (w,h), cv2.CV_32FC1)     #TODO: Add stereo rectification here
+            self.cam_size_done += 1
+
+    def undistort_image(self, msg: Image, cv_image: np.ndarray):
+
+        if self.cam_size_done < 6: # get optimal camera matrix only once
+                self.get_dst_map(msg, cv_image)
+                self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
+
+        else:
+            # get camera info
+            if msg.header.frame_id == "camera_front_center": 
+                roi = self.fc_roi
+                map1, map2 = self.fc_map1, self.fc_map2
+            if msg.header.frame_id == "camera_rear_center": 
+                roi = self.rc_roi
+                map1, map2 = self.rc_map1, self.rc_map2
+            if msg.header.frame_id == "camera_right_side": 
+                roi = self.rs_roi
+                map1, map2 = self.rs_map1, self.rs_map2
+            if msg.header.frame_id == "camera_left_side": 
+                roi = self.ls_roi
+                map1, map2 = self.ls_map1, self.ls_map2
+            if msg.header.frame_id == "camera_front_right": 
+                roi = self.fr_roi
+                map1, map2 = self.fr_map1, self.fr_map2
+            if msg.header.frame_id == "camera_front_left": 
+                roi = self.fl_roi
+                map1, map2 = self.fl_map1, self.fl_map2
+
+            # undistort the image before running YOLO
+            dst = cv2.remap(cv_image, map1, map2, cv2.INTER_NEAREST)
+
+            # crop the image
+            x, y, w, h = roi 
+            un_dist_image = dst[y:y+h,x:x+w]
+
+            return un_dist_image
 
     def detections_cb(self, img_msg: Image, detection_msg: DetectionArray) -> None:
 
         cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, "bgr8")
+        clock = Clock()
+        start_time = clock.now()
 
+        # downsample image
+        new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
+        cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
+
+        end_time = clock.now()
+        duration_ns = end_time.nanoseconds - start_time.nanoseconds
+        duration_s = duration_ns / 1e9  # Convert nanoseconds to seconds
+        
         # if unndistort is enabled and cam info is stored, then undistort the image
         if self.undistort and self.cam_info_done == 6:
-
-            # get camera info
-            if img_msg.header.frame_id == "camera_front_center": 
-                k_mtx = self.fc_k_mtx
-                d_mtx = self.fc_d_mtx
-            if img_msg.header.frame_id == "camera_rear_center": 
-                k_mtx = self.rc_k_mtx
-                d_mtx = self.rc_d_mtx
-            if img_msg.header.frame_id == "camera_right_side": 
-                k_mtx = self.rs_k_mtx
-                d_mtx = self.rs_d_mtx
-            if img_msg.header.frame_id == "camera_left_side": 
-                k_mtx = self.ls_k_mtx
-                d_mtx = self.ls_d_mtx
-            if img_msg.header.frame_id == "camera_front_right": 
-                k_mtx = self.fr_k_mtx
-                d_mtx = self.fr_d_mtx
-            if img_msg.header.frame_id == "camera_front_left": 
-                k_mtx = self.fl_k_mtx
-                d_mtx = self.fl_d_mtx
-
-            # Get image size
-            h, w = cv_image.shape[:2]  # Assuming cv_image is the input image
-
-            # Get the optimal new camera matrix
-            new_camera_mtx, roi = cv2.getOptimalNewCameraMatrix(k_mtx, d_mtx, (w, h), 0, (w, h))
-
-            # undistort the image before running YOLO
-            dst = cv2.undistort(cv_image, k_mtx, d_mtx, None, new_camera_mtx)
-
-            # crop the image
-            x, y, w, h = roi 
-            cv_image = dst[y:y+h,x:x+w]
-
+            un_dist_image = self.undistort_image(img_msg, cv_image)
+            if self.cam_size_done == 7:
+                cv_image = un_dist_image
 
         bb_marker_array = MarkerArray()
         kp_marker_array = MarkerArray()
