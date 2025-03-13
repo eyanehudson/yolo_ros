@@ -186,7 +186,7 @@ class DebugNode(LifecycleNode):
         for cam_sub, det_sub in self.active_detections:
             sync = message_filters.ApproximateTimeSynchronizer((cam_sub, det_sub), 10, 0.5)
             sync.registerCallback(self.detections_cb)
-            self.get_logger().info(f"Synchronizer created for {cam_sub} and {det_sub}")
+            # self.get_logger().info(f"Synchronizer created for {cam_sub} and {det_sub}")
             self.synchronizers.append(sync)
 
         self.get_logger().info(f"Active synchronizers: {len(self.synchronizers)}")

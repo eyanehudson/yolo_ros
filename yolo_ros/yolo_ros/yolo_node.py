@@ -190,7 +190,7 @@ class YoloNode(LifecycleNode):
         self.last_callback_time = 0  # Track last execution time
         self.delay = 0.99 * (1 / self.frequency) # .99 to make the function run slightly faster than the desired frequency to account for loop delay
 
-
+        self.clock = Clock()
         self.cv_bridge = CvBridge()
 
         super().on_configure(state)
@@ -351,6 +351,8 @@ class YoloNode(LifecycleNode):
 
     
     def wrapped_callback(self, *images):
+        # self.start_time = self.clock.now()
+
         current_time = time.time()
         time_since_last_callback = current_time - self.last_callback_time
         self.get_logger().info(f"callback at {1/(time_since_last_callback):.3f} Hz")
@@ -607,9 +609,14 @@ class YoloNode(LifecycleNode):
     def image_cb(self, **kwargs) -> None:
 
         if self.enable:
+            self.start_time = self.clock.now()
+            end_time = self.clock.now()
+            duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
+            duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
+            # self.get_logger().info(f"Starting image_cb: {duration_ms:.3f} ms")
+
+            
             # TODO: For debugging
-            clock = Clock()
-            start_time = clock.now()
             # self.get_logger().info(f"[{self.get_name()}] Start processing {msg.header.frame_id} at {start_time.nanoseconds} nanoseconds")
 
             # Mapping of frame IDs to publisher objects
@@ -629,8 +636,8 @@ class YoloNode(LifecycleNode):
             
             for camera_name, image in kwargs.items():
                 self.get_logger().info(f"Processing image from {camera_name}")
-                end_time = clock.now()
-                duration_ns = end_time.nanoseconds - start_time.nanoseconds
+                end_time = self.clock.now()
+                duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
                 duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
                 self.get_logger().info(f"entering for loop Function duration: {duration_ms:.3f} ms")
 
@@ -647,8 +654,8 @@ class YoloNode(LifecycleNode):
                 image_batch.append(cv_image) # store cv_image
                 msg_batch.append(msg) # store ros2 msg
 
-            end_time = clock.now()
-            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            end_time = self.clock.now()
+            duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"cv_image convert and downsample Function duration: {duration_ms:.3f} ms")
 
@@ -664,9 +671,9 @@ class YoloNode(LifecycleNode):
                     batch.append(cv_image)
 
             # TODO: Debugging
-            end_time = clock.now()
+            end_time = self.clock.now()
             # self.get_logger().info(f"[{self.get_name()}] End processing {msg.header.frame_id} at {end_time.nanoseconds} nanoseconds")
-            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"undistort Function duration: {duration_ms:.3f} ms")
 
@@ -701,8 +708,8 @@ class YoloNode(LifecycleNode):
                 self.get_logger().error(f"Error converting results to list: {e}")
                 return
 
-            end_time = clock.now()
-            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            end_time = self.clock.now()
+            duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"got results Function duration: {duration_ms:.3f} ms")
 
@@ -742,8 +749,8 @@ class YoloNode(LifecycleNode):
                     final_pub.append(target_pub)
                     final_det.append(detections_msg)                   
         
-            end_time = clock.now()
-            duration_ns = end_time.nanoseconds - start_time.nanoseconds
+            end_time = self.clock.now()
+            duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"create detecton array Function duration: {duration_ms:.3f} ms")
 

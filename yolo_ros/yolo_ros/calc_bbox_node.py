@@ -147,31 +147,28 @@ class BboxNode(LifecycleNode):
             CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
         )
 
-       
-        # self.cam_info_sub = message_filters.Subscriber(
-        #     self, CameraInfo, "/perception/test/camera_front_center/camera_info", qos_profile=self.cam_info_qos_profile
-        # )
 
         # detection subs 
         self.fc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_center/detections", qos_profile=10
+            self, DetectionArray, self.fc_detection_topic, qos_profile=10
         )
         self.rc_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_rear_center/detections", qos_profile=10
+            self, DetectionArray, self.rc_detection_topic, qos_profile=10
         )
         self.rs_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_right_side/detections", qos_profile=10
+            self, DetectionArray, self.rs_detection_topic, qos_profile=10
         )
         self.ls_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_left_side/detections", qos_profile=10
+            self, DetectionArray, self.ls_detection_topic, qos_profile=10
         )
         self.fr_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_right/detections", qos_profile=10
+            self, DetectionArray, self.fr_detection_topic, qos_profile=10
         )
         self.fl_detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "/perception/post/camera_front_left/detections", qos_profile=10
+            self, DetectionArray, self.fl_detection_topic, qos_profile=10
         )
 
+        # Detections should always be published as an empty list, so these should always synchronize. If the function is not entering at all, then check to ensure the detections are being published
 
         self.stereo_synchronizer = message_filters.ApproximateTimeSynchronizer(
             (self.fr_detections_sub, self.fl_detections_sub), 10, 0.5 
@@ -283,7 +280,6 @@ class BboxNode(LifecycleNode):
             fr_detections_msg, fl_detections_msg
         )
         self.stereo_pub.publish(new_detections_msg)
-        # self.get_logger().info(f"[{self.get_name()}] new_bbox published")
 
     def on_pinhole_detections(
         self,
@@ -292,7 +288,7 @@ class BboxNode(LifecycleNode):
         rs_detections_msg: DetectionArray,
         ls_detections_msg: DetectionArray,
     ) -> None:
-        self.get_logger().info(f"[{self.get_name()}] Entering on pinhole detection")
+        # self.get_logger().info(f"[{self.get_name()}] Entering on pinhole detection")
 
         fc_new_detections_msg = DetectionArray()
         rc_new_detections_msg = DetectionArray()
@@ -313,7 +309,7 @@ class BboxNode(LifecycleNode):
         self.rc_pub.publish(rc_new_detections_msg)
         self.rs_pub.publish(rs_new_detections_msg)
         self.ls_pub.publish(ls_new_detections_msg)
-        self.get_logger().info(f"[{self.get_name()}] new_bbox published")
+        # self.get_logger().info(f"[{self.get_name()}] new_bbox published")
 
     def process_stereo_detections(
         self,
@@ -335,17 +331,6 @@ class BboxNode(LifecycleNode):
         #     return []
 
         new_detections = []
-
-                # if detection.keypoints.data:
-                #     keypoints3d = self.convert_keypoints_to_3d(
-                #         front_center_image, cam_info_msg, detection
-                #     )
-                #     keypoints3d = BboxNode.transform_3d_keypoints(
-                #         keypoints3d, transform[0], transform[1]
-                #     )
-                #     keypoints3d.frame_id = self.target_frame
-                #     new_detections[-1].keypoints3d = keypoints3d
-
             
         for fr_detection, fl_detection in zip(fr_detections_msg.detections, fl_detections_msg.detections):
             bbox3d = self.convert_stereo(fr_detection, fl_detection)
@@ -434,7 +419,7 @@ class BboxNode(LifecycleNode):
             k_mtx = self.ls_k_mtx  
         fy = k_mtx[1,1]
         fx = k_mtx[0,0]
-        cx = k_mtx[0,2] * self.scale
+        cx = k_mtx[0,2] * self.scale # TODO: Need to scale the centroid based on downsampling of the image in processing 
         cy = k_mtx[1,2] * self.scale
 
         # TODO: Correct the pinhole model calculations
@@ -486,7 +471,7 @@ class BboxNode(LifecycleNode):
         disparity = x - x_prime
         # self.get_logger().info(f"x = {x},    x_prime = {x_prime},     disparity = {disparity}")
         if disparity == 0: # handle the zero case
-            disparity = 0.0000001 # this will maek depth inf
+            disparity = 0.0000001 # this will make depth inf
 
         depth = cam_distance*fx/(disparity) #TODO: correct this math
         self.get_logger().info(f"depth = {depth}")
@@ -506,41 +491,6 @@ class BboxNode(LifecycleNode):
         msg.center.position.z = theta_degrees # publishing as theta for now
         
         return msg
-
-    def convert_keypoints_to_3d(
-        self, depth_image: np.ndarray, depth_info: CameraInfo, detection: Detection
-    ) -> KeyPoint3DArray:
-
-        # build an array of 2d keypoints
-        keypoints_2d = np.array(
-            [[p.point.x, p.point.y] for p in detection.keypoints.data], dtype=np.int16
-        )
-        u = np.array(keypoints_2d[:, 1]).clip(0, depth_info.height - 1)
-        v = np.array(keypoints_2d[:, 0]).clip(0, depth_info.width - 1)
-
-        # sample depth image and project to 3D
-        z = depth_image[u, v]
-        k = depth_info.k
-        px, py, fx, fy = k[2], k[5], k[0], k[4]
-        x = z * (v - px) / fx
-        y = z * (u - py) / fy
-        points_3d = (
-            np.dstack([x, y, z]).reshape(-1, 3) / self.depth_image_units_divisor
-        )  # convert to meters
-
-        # generate message
-        msg_array = KeyPoint3DArray()
-        for p, d in zip(points_3d, detection.keypoints.data):
-            if not np.isnan(p).any():
-                msg = KeyPoint3D()
-                msg.point.x = p[0]
-                msg.point.y = p[1]
-                msg.point.z = p[2]
-                msg.id = d.id
-                msg.score = d.score
-                msg_array.data.append(msg)
-
-        return msg_array
 
     def get_transform(self, frame_id: str) -> Tuple[np.ndarray]: 
         # transform position from image frame to target_frame
