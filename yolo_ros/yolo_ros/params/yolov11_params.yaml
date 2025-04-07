@@ -2,22 +2,22 @@
 /**:
   ros__parameters: 
     model_type: "YOLO"                                                # Ultralytics model type (default: YOLO)
-    model: "yolov11_best_18FEB.pt"                                     # YOLO model (default: yolov8m.pt)
+    model: "yolov11_best_18FEB.pt"                                    # YOLO model (default: yolov8m.pt)
     tracker: "bytetrack.yaml"                                         # tracker file (default: bytetrack.yaml)
     device: "cuda:0"                                                  # GPU/CUDA (default: cuda:0)
     enable:  True                                                     # whether to start YOLO enabled (default: True)
-    undistort: True # whether to undistort the image or not (default: true)
+    undistort: True                                                   # whether to undistort the image or not (default: true)
     threshold: 0.7                                                    # detection threshold (default: 0.5)
     iou: 0.7                                                          # intersection Over Union (IoU) threshold for Non-Maximum Suppression (NMS) (default: 0.7)
     imgsz_height: 640                                                 # image height for inference (default: 480)
     imgsz_width: 640                                                  # image width for inference (default: 640)
-    half: True                                                       # whether to enable half-precision (FP16) inference speeding up model inference with minimal impact on accuracy (default: False)
+    half: True                                                        # whether to enable half-precision (FP16) inference speeding up model inference with minimal impact on accuracy (default: False)
     max_det: 3                                                        # maximum number of detections allowed per image (default: 300)
     augment: False                                                    # whether to enable test-time augmentation (TTA) for predictions improving detection robustness at the cost of speed (default: False)
     agnostic_nms: False                                               # whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes (default: False)
     retina_masks: False                                               # whether to use high-resolution segmentation masks if available in the model, enhancing mask quality for segmentation (default: False)
     scale: 0.5                                                        # downsampling scale (1.0 is no downsampling) 0.5 is default
-    frequency: 10                                                      # frequency to publish detections (default 10hz)
+    frequency: 10                                                     # frequency to publish detections (default 10hz)
     
 
 
@@ -46,19 +46,13 @@
 
     
     image_reliability: 1                                              # reliability for the image topic: 0=system default, 1=Reliable, 2=Best Effort (default: 2)
-    input_depth_topic: "/camera/depth/image_raw"                      # camera topic of depth images (default: /camera/depth/image_raw)
     cam_image_reliability: 1                                        # reliability for the depth image topic: 0=system default, 1=Reliable, 2=Best Effort (default: 2)
-    input_depth_info_topic: "/camera/depth/camera_info"               # camera topic for info data (default: /camera/depth/camera_info)
     cam_info_reliability: 1                                         # reliability for the depth info topic: 0=system default, 1=Reliable, 2=Best Effort (default: 2)
     target_frame: "center_of_gravity"                                 # frame to transform the 3D boxes (default: base_link)
     depth_image_units_divisor: 1000                                   # divisor to convert the depth image into meters (default: 1000)
     maximum_detection_threshold: 0.3                                  # maximum detection threshold in the z-axis (default: 0.3)
-    dallara_height: 0.9 #1.22 #0.75    #TODO: Test 4 ft
+    dallara_height: 0.9         #1.22 #0.75    #TODO: Test 4 ft
     box_lateral_size: 2.2
     box_long_size: 5.0   
     box_height: 0.8
     
-    
-    use_tracking: True       #doesnt work                                         # whether to activate tracking after detection (default: True)
-    use_3d: False                #                                     # whether to activate 3D detections (default: False)
-    use_debug: True             #                                      # whether to activate debug node (default: True)

@@ -149,12 +149,12 @@ class YoloNode(LifecycleNode):
         self.fl_input_topic = self.get_parameter("fl_input_topic").value
 
         self.camera_topics = {
-            'fc' : self.fc_input_topic,
-            'rc' : self.rc_input_topic,
-            'rs' : self.rs_input_topic,
-            'ls' : self.ls_input_topic,
-            'fr' : self.fr_input_topic,
-            'fl' : self.fl_input_topic,
+            'camera_front_center' : self.fc_input_topic,
+            'camera_rear_center' : self.rc_input_topic,
+            'camera_right_side' : self.rs_input_topic,
+            'camera_left_side' : self.ls_input_topic,
+            'camera_front_right' : self.fr_input_topic,
+            'camera_front_left' : self.fl_input_topic,
         }
 
         self.fc_detection_topic = self.get_parameter("fc_detection_topic").value
@@ -234,31 +234,12 @@ class YoloNode(LifecycleNode):
         for name, topic in self.camera_topics.items():
             if self.is_topic_active(topic):  # Only subscribe if the topic is active
                 sub = message_filters.Subscriber(self, Image, topic, qos_profile=self.image_qos_profile)
+                self.camera_topics[name] = self.create_subscription(CameraInfo, f"/perception/test/{name}/camera_info", self.get_camera_info, 10) # subscribe to camera_info for each camera
                 self.subscribers.append(sub)
                 self.active_cam_names.append(name)
                 self.get_logger().info(f"Subscribed to {topic}")
         self.get_logger().info(f"Subscribed cameras are {self.active_cam_names}")
 
-
-        # Camera info topic subscribers 
-        self.fc_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_center/camera_info", self.get_camera_info, 10
-        )
-        self.rc_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_rear_center/camera_info", self.get_camera_info, 10
-        )
-        self.rs_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_right_side/camera_info", self.get_camera_info, 10
-        )
-        self.ls_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_left_side/camera_info", self.get_camera_info, 10
-        )
-        self.fr_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_right/camera_info", self.get_camera_info, 10
-        )
-        self.fl_cam_info_sub = self.create_subscription(
-            CameraInfo, "/perception/test/camera_front_left/camera_info", self.get_camera_info, 10
-        )
 
         # Synchronization only when at least one camera is active
         if len(self.subscribers) > 0:
@@ -499,44 +480,35 @@ class YoloNode(LifecycleNode):
         # decide which camera you need the cam_info for
         self.get_logger().info(f"[{self.get_name()}] getting {cam_info.header.frame_id} camera info")
         self.get_logger().info(f"[{self.get_name()}] cam info is at {self.cam_info_done+1}")
+        name = f"{cam_info.header.frame_id}"
 
         # kill the subscriber
-        if cam_info.header.frame_id == "camera_front_center" and self.fc_cam_info_sub:  # front center camera
+        if name == "camera_front_center" and self.camera_topics[name]:  # front center camera
             self.fc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.fc_cam_info_sub)
-            self.fc_cam_info_sub = None
             self.cam_info_done += 1
-        elif cam_info.header.frame_id == "camera_rear_center" and self.rc_cam_info_sub: # rear center camera
+        elif name == "camera_rear_center" and self.camera_topics[name]: # rear center camera
             self.rc_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rc_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.rc_cam_info_sub)
-            self.rc_cam_info_sub = None
             self.cam_info_done += 1
-        elif cam_info.header.frame_id == "camera_right_side" and self.rs_cam_info_sub: # right side camera
+        elif name == "camera_right_side" and self.camera_topics[name]: # right side camera
             self.rs_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.rs_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.rs_cam_info_sub)
-            self.rs_cam_info_sub = None
             self.cam_info_done += 1
-        elif cam_info.header.frame_id == "camera_left_side" and self.ls_cam_info_sub: # left side camera
+        elif name == "camera_left_side" and self.camera_topics[name]: # left side camera
             self.ls_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.ls_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.ls_cam_info_sub)
-            self.ls_cam_info_sub = None
             self.cam_info_done += 1   
-        elif cam_info.header.frame_id == "camera_front_right" and self.fr_cam_info_sub: # front right camera
+        elif name == "camera_front_right" and self.camera_topics[name]: # front right camera
             self.fr_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fr_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.fr_cam_info_sub)
-            self.fr_cam_info_sub = None
             self.cam_info_done += 1
-        elif cam_info.header.frame_id == "camera_front_left" and self.fl_cam_info_sub: # front left camera
+        elif name == "camera_front_left" and self.camera_topics[name]: # front left camera
             self.fl_k_mtx = np.array(cam_info.k).reshape((3, 3))  # Convert to 3x3 matrix Camera intrinsic parameters 
             self.fl_d_mtx = np.array(cam_info.d)                  # Convert distortion coefficients to NumPy array Distortion Coefficients
-            self.destroy_subscription(self.fl_cam_info_sub)
-            self.fl_cam_info_sub = None
             self.cam_info_done += 1
+        self.destroy_subscription(self.camera_topics[name])
+        self.camera_topics[name] = None
         
     def get_dst_map(self, msg: Image, cv_image: np.ndarray):   # function to get cam size, optimal new matrix, and undist map
         
@@ -662,7 +634,7 @@ class YoloNode(LifecycleNode):
             for i in range(len(image_batch)):
 
                 # if unndistort is enabled and cam info is stored, then undistort the image
-                if self.undistort and self.cam_info_done == 6:
+                if self.undistort and self.cam_info_done == len(image_batch):
                         
                     un_dist_image = self.undistort_image(msg_batch[i], image_batch[i])
                     
