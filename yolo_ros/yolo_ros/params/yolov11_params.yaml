@@ -2,7 +2,7 @@
 /**:
   ros__parameters: 
     model_type: "YOLO"                                                # Ultralytics model type (default: YOLO)
-    model: "yolov11_best_18FEB.pt"                                     # YOLO model (default: yolov8m.pt)
+    model: "yolov11_best_18FEB"                                       # YOLO model ### DO NOT INCLUDE THE .pt (default: yolov8m.pt)
     tracker: "bytetrack.yaml"                                         # tracker file (default: bytetrack.yaml)
     device: "cuda:0"                                                  # GPU/CUDA (default: cuda:0)
     enable:  True                                                     # whether to start YOLO enabled (default: True)

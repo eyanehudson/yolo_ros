@@ -29,9 +29,12 @@ import sys
 
 from typing import List, Dict
 from cv_bridge import CvBridge
+# import cupy as cp
+import torch
 
 import numpy as np
 import time
+import shutil
 
 import rclpy
 from rclpy.qos import QoSProfile
@@ -45,7 +48,6 @@ from rclpy.clock import Clock
 from rclpy.executors import MultiThreadedExecutor
 
 
-import torch
 from ultralytics import YOLO, NAS, YOLOWorld
 from ultralytics.engine.results import Results
 from ultralytics.engine.results import Boxes
@@ -126,7 +128,7 @@ class YoloNode(LifecycleNode):
         # get all params from params.yaml file
         self.model_type = self.get_parameter("model_type").value
         self.model_ = self.get_parameter("model").value # this is the name of the .pt model
-        self.model = os.path.join(file_location, 'config', self.model_) # this is the full path of the .pt model
+        self.model = os.path.join(file_location, 'config', self.model_) #model this is the full path of the .pt model
         
         self.device = self.get_parameter("device").value
         self.threshold = self.get_parameter("threshold").value
@@ -206,20 +208,37 @@ class YoloNode(LifecycleNode):
             self.get_logger().info(f"Using [{self.device}] as gpu")
         elif "cpu" in self.device:
             self.get_logger().info(f"Using [{self.device}] as cpu")
-            self.device = torch.device("cpu")
+            # self.device = torch.device("cpu")
 
         try:
-            self.yolo = self.type_to_model[self.model_type](self.model)
+            self.get_logger().info(f"Trying to get model")
+
+            self.yolo_pt = self.type_to_model[self.model_type](self.model + ".pt", task='detect') # loading the model as a .pt 
+
+            # export the model to TensorRT format
+            if os.path.exists(self.model + ".engine"): # check if engine was already generated
+                self.get_logger().info(f"path exists")
+                self.yolo = self.type_to_model[self.model_type](self.model + ".engine", task='detect') # run model on GPU
+
+            else: # if engine doesn't exist, create it in the share folder, and the source
+                self.get_logger().info(f"Path doesnt exist")
+                self.yolo_pt.export(format="engine", half=self.half, batch=5, dynamic=True, nms=True)
+
+                self.yolo = self.type_to_model[self.model_type](self.model + ".engine", task='detect') # run model on GPU
+                engine_file_path_2 = os.path.join(os.path.expanduser("~"), "on-vehicle/src/perception/yolo_ros/yolo_ros/yolo_ros/config/", self.model_ + ".engine")
+                self.get_logger().info(f"Copied the file to {engine_file_path_2}")
+                shutil.copy(self.model + ".engine", engine_file_path_2) # copy the file to the source directory
+
             self.get_logger().info(f"Using [{self.model_}]")
         except FileNotFoundError:
             self.get_logger().error(f"Model file '{self.model}' does not exists")
             return TransitionCallbackReturn.ERROR
 
-        try:
-            self.get_logger().info("Trying to fuse model...")
-            self.yolo.fuse()
-        except TypeError as e:
-            self.get_logger().warn(f"Error while fuse: {e}")
+        # try:
+        #     self.get_logger().info("Trying to fuse model...")
+        #     self.yolo.fuse()
+        # except TypeError as e:
+        #     self.get_logger().warn(f"Error while fuse: {e}")
 
         self._enable_srv = self.create_service(SetBool, "enable", self.enable_cb)
 
@@ -278,7 +297,7 @@ class YoloNode(LifecycleNode):
         del self.yolo
         if "cuda" in self.device:
             self.get_logger().info("Clearing CUDA cache")
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
         self.destroy_service(self._enable_srv)
         self._enable_srv = None
@@ -538,10 +557,9 @@ class YoloNode(LifecycleNode):
             self.fl_cam_info_sub = None
             self.cam_info_done += 1
         
-    def get_dst_map(self, msg: Image, cv_image: np.ndarray):   # function to get cam size, optimal new matrix, and undist map
+    def get_dst_map(self, msg: Image, h, w):   # function to get cam size, optimal new matrix, and undist map
         
         # Get image size
-        h, w = cv_image.shape[:2]  # Assuming cv_image is cv_bridthe input image
         R = np.eye(3, dtype=np.float32)  # Rectification matrix (Identity if not stereo)
 
         if msg.header.frame_id == "camera_front_center":
@@ -569,41 +587,64 @@ class YoloNode(LifecycleNode):
             self.fl_map1, self.fl_map2 = cv2.initUndistortRectifyMap(self.fl_k_mtx, self.fl_d_mtx, R, self.fl_new_camera_mtx, (w,h), cv2.CV_32FC1)     #TODO: Add stereo rectification here
             self.cam_size_done += 1
 
-    def undistort_image(self, msg: Image, cv_image: np.ndarray):
+    def undistort_image(self, msg_batch: list, gpu_image_batch: list):
+        un_dist_image_batch = []
 
-        if self.cam_size_done < 6: # get optimal camera matrix only once
-                self.get_dst_map(msg, cv_image)
-                self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
+        for image in range(len(msg_batch)):
+            msg = msg_batch[image]
+            gpu_image = gpu_image_batch[image]
+            h = gpu_image.size()[1] # height
+            w = gpu_image.size()[0] # width
+            map1 = cv2.cuda.GpuMat()
+            map2 = cv2.cuda.GpuMat()
 
-        else:
-            # get camera info
-            if msg.header.frame_id == "camera_front_center":
-                roi = self.fc_roi
-                map1, map2 = self.fc_map1, self.fc_map2
-            if msg.header.frame_id == "camera_rear_center": 
-                roi = self.rc_roi
-                map1, map2 = self.rc_map1, self.rc_map2
-            if msg.header.frame_id == "camera_right_side": 
-                roi = self.rs_roi
-                map1, map2 = self.rs_map1, self.rs_map2
-            if msg.header.frame_id == "camera_left_side": 
-                roi = self.ls_roi
-                map1, map2 = self.ls_map1, self.ls_map2
-            if msg.header.frame_id == "camera_front_right": 
-                roi = self.fr_roi
-                map1, map2 = self.fr_map1, self.fr_map2
-            if msg.header.frame_id == "camera_front_left": 
-                roi = self.fl_roi
-                map1, map2 = self.fl_map1, self.fl_map2
+            if self.cam_size_done < (len(msg_batch)): # get optimal camera matrix only once
+                    self.get_dst_map(msg,h,w)
+                    self.get_logger().info(f"cam_size_done =  {self.cam_size_done}")
+                    un_dist_image_batch.append(gpu_image) # this should only run once
+            else:
+                # get camera info
+                if msg.header.frame_id == "camera_front_center":
+                    roi = self.fc_roi
+                    map1.upload(self.fc_map1)
+                    map2.upload(self.fc_map2)
+                if msg.header.frame_id == "camera_rear_center": 
+                    roi = self.rc_roi
+                    map1.upload(self.rc_map1)
+                    map2.upload(self.rc_map2)
+                if msg.header.frame_id == "camera_right_side": 
+                    roi = self.rs_roi
+                    map1.upload(self.rs_map1)
+                    map2.upload(self.rs_map2)
+                if msg.header.frame_id == "camera_left_side": 
+                    roi = self.ls_roi
+                    map1.upload(self.ls_map1)
+                    map2.upload(self.ls_map2)
+                if msg.header.frame_id == "camera_front_right": 
+                    roi = self.fr_roi
+                    map1.upload(self.fr_map1)
+                    map2.upload(self.fr_map2)
+                if msg.header.frame_id == "camera_front_left": 
+                    roi = self.fl_roi
+                    map1.upload(self.fl_map1)
+                    map2.upload(self.fl_map2)
 
-            # undistort the image before running YOLO
-            dst = cv2.remap(cv_image, map1, map2, cv2.INTER_NEAREST) # TODO: If bad quality, change to INTER_LINEAR
+                # undistort the image before running YOLO
+                dst = cv2.cuda.remap(gpu_image, map1, map2, cv2.INTER_NEAREST) # TODO: If bad quality, change to INTER_LINEAR
+                # self.get_logger().info(f" un_dist_image_batch = {dst}")
 
-            # crop the image
-            x, y, w, h = roi 
-            un_dist_image = dst[y:y+h,x:x+w]
-            
-            return un_dist_image
+                # convert from gpumat to numpy array
+                wid, hei, cha = cv2.cuda.split(dst) # break the image into w, h, and c (channel)
+                gpu_numpy = cv2.cuda.merge([cha,hei,wid])
+
+                # crop the image
+                x, y, w, h = roi 
+                un_dist_image = gpu_numpy[y:y+h,x:x+w]
+                
+                un_dist_image_batch.append(un_dist_image)
+        self.get_logger().info(f"length of un_dist_image_batch = {len(un_dist_image_batch)}")
+                
+        return un_dist_image_batch
 
 
     def image_cb(self, **kwargs) -> None:
@@ -631,9 +672,13 @@ class YoloNode(LifecycleNode):
             final_pub = []
             final_det = []
             batch = []
-            image_batch = []
             msg_batch = []
+            gpu_batch= []
+            gpu_image_batch = []
+            gpu_numpy_batch = []
+            gpu_image_resized_batch = []
             
+
             for camera_name, image in kwargs.items():
                 self.get_logger().info(f"Processing image from {camera_name}")
                 end_time = self.clock.now()
@@ -644,31 +689,50 @@ class YoloNode(LifecycleNode):
                 msg = kwargs[camera_name]
 
                 # convert to cv_image
-                cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
-                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                cv_image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
 
-                # downsample image
-                new_size = (int(cv_image.shape[1] * self.scale), int(cv_image.shape[0] * self.scale))
-                cv_image = cv2.resize(cv_image, new_size, interpolation=cv2.INTER_NEAREST)
-
-                image_batch.append(cv_image) # store cv_image
+                gpu_image = cv2.cuda.GpuMat() # create a GpuMat
+                gpu_image.upload(cv_image) # store cv_image on gpu
+                gpu_image_batch.append(gpu_image) # append the frame to a batch on the gpu
                 msg_batch.append(msg) # store ros2 msg
+                # print(gpu_image.channels())  # Should print 3 for a BGR image
+
+                        
+            # downsample image
+            for i in range(len(msg_batch)):
+                gpu_image = gpu_image_batch[i]
+
+                
+                gpu_image_rgb = cv2.cuda.cvtColor(gpu_image, cv2.COLOR_BGR2RGB) # convert BGR to RGB
+                
+                gpu_image_resized = cv2.cuda.resize(gpu_image_rgb, (int(gpu_image_rgb.size()[0]*self.scale), int(gpu_image_rgb.size()[1]*self.scale)), interpolation=cv2.INTER_NEAREST) # size on gpu is w,h and opencv on cpu expects h,w
+                
+                gpu_image_resized_batch.append(gpu_image_resized) # batch the downsampled images
+                # self.get_logger().info(f"Image size: {gpu_image_resized.size()}")
+                # self.get_logger().info(f"Image type: {gpu_image_resized.type()}")
+
 
             end_time = self.clock.now()
             duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"cv_image convert and downsample Function duration: {duration_ms:.3f} ms")
 
-            for i in range(len(image_batch)):
 
-                # if unndistort is enabled and cam info is stored, then undistort the image
-                if self.undistort and self.cam_info_done == 6:
-                        
-                    un_dist_image = self.undistort_image(msg_batch[i], image_batch[i])
+            # if unndistort is enabled and cam info is stored, then undistort the image
+            if self.undistort and self.cam_info_done == 6:
                     
-                    batch.append(un_dist_image)
-                else:
-                    batch.append(cv_image)
+                batch = self.undistort_image(msg_batch, gpu_image_resized_batch) # send the gpu image patch after downsamplnig and return an undistorted image batch
+            
+            else:
+                gpu_batch = gpu_image_resized_batch
+                
+                # convert from gpu mat to numpy array
+                for image in gpu_batch:  # Assume gpu_image_batch is a list of cv2.cuda.GpuMat
+                   
+                    w, h, c = cv2.cuda.split(image) # break the image into w, h, and c (channel)
+                    gpu_numpy = cv2.cuda.merge([c,h,w])
+
+                    batch.append(gpu_numpy)
 
             # TODO: Debugging
             end_time = self.clock.now()
@@ -676,7 +740,6 @@ class YoloNode(LifecycleNode):
             duration_ns = end_time.nanoseconds - self.start_time.nanoseconds
             duration_ms = duration_ns / 1e6  # Convert nanoseconds to seconds
             self.get_logger().info(f"undistort Function duration: {duration_ms:.3f} ms")
-
 
             # predict
             self.get_logger().info(f"the length of batch is {len(batch)}")
@@ -691,7 +754,7 @@ class YoloNode(LifecycleNode):
                 half=self.half,
                 max_det=self.max_det,
                 augment=self.augment,
-                agnostic_nms=self.agnostic_nms,
+                # agnostic_nms=self.agnostic_nms,
                 retina_masks=self.retina_masks,
                 device=self.device,
             )
@@ -717,6 +780,8 @@ class YoloNode(LifecycleNode):
                 
                 results: Results = results_list[result].cuda()
                 # self.get_logger().info(f"results are {results}")
+                
+                # results = gpu_image_batch[result].download()
 
                 if results.boxes or results.obb:
                     hypothesis = self.parse_hypothesis(results)
